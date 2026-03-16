@@ -55,8 +55,23 @@ export function normalizeResponse(raw: string): NormalizeResult {
   if (!jsonStr) {
     const braceMatch = text.match(/\{[\s\S]*\}/);
     if (braceMatch) {
-      jsonStr = braceMatch[0];
-      fixes.push('extracted JSON from raw text');
+      // Verify this is valid JSON or fixable — if not, try the truncated version
+      try {
+        JSON.parse(braceMatch[0]);
+        jsonStr = braceMatch[0];
+        fixes.push('extracted JSON from raw text');
+      } catch {
+        // Check if the full text extends beyond the last } (truncated response)
+        const fullText = text.match(/\{[\s\S]*/);
+        if (fullText && fullText[0].length > braceMatch[0].length) {
+          // Use the full truncated version — autoCloseJson will handle it
+          jsonStr = fullText[0];
+          fixes.push('extracted truncated JSON from raw text');
+        } else {
+          jsonStr = braceMatch[0];
+          fixes.push('extracted JSON from raw text');
+        }
+      }
     }
   }
 
@@ -181,12 +196,17 @@ function autoCloseJson(str: string): string | null {
 
   // Close dangling string — truncate to last complete JSON element
   if (inString) {
-    // Strategy: find the last complete step object by looking for "},\n" or "}\n"
-    // and truncate everything after it
-    const lastCompleteObj = Math.max(
-      result.lastIndexOf('},'),
-      result.lastIndexOf('}\n'),
-    );
+    // Strategy: find the last step boundary — "},\n" indicates end of one array element
+    // and start of another. This is more reliable than just "}," which can match
+    // nested objects like "params": {},"
+    let lastCompleteObj = result.lastIndexOf('},\n');
+    if (lastCompleteObj < 0) lastCompleteObj = result.lastIndexOf('}\n');
+    // Fallback: find a "}" followed by "," at the end of a line with description
+    if (lastCompleteObj < 0) {
+      // Look for complete step objects: "}," preceded by a quoted value end
+      const stepBoundary = result.lastIndexOf('"},');
+      if (stepBoundary > 0) lastCompleteObj = stepBoundary + 1; // Position after the }
+    }
     if (lastCompleteObj > 0) {
       result = result.slice(0, lastCompleteObj + 1);
     } else {
