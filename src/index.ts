@@ -44,3 +44,6 @@ export { learnSkill, learnFromError, learnFix } from './agent/learn.js';
 // Eval
 export { ModelEvaluator } from './eval/evaluator.js';
 export type { EvalGoal, EvalModelConfig, EvalRunResult, EvalReport } from './eval/evaluator.js';
+
+// MCP
+export { McpServer, startMcpServer } from './mcp/server.js';

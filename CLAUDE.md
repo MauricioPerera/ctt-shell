@@ -30,6 +30,7 @@ src/
                + recall (TF-IDF context builder) + learn (skill lifecycle)
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry for small models
+  mcp/            → MCP server (6 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain adapter (7 operations, 5 eval goals)
@@ -51,6 +52,7 @@ node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js status                  # Store stats
 node dist/src/cli/cli.js domain list             # List registered domains
+node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 ```
 
 ## Environment variables
@@ -142,6 +144,37 @@ Model                                 JSON%   Plan%   Comp%   Exec%   Steps   La
 @cf/meta/llama-3.2-3b-instruct          96%     96%     96%      0%     2.0    1545ms
 @cf/google/gemma-3-12b-it              100%    100%    100%      0%     2.2    4156ms
 ```
+
+## MCP Server (src/mcp/)
+Exposes CTT pipeline as MCP tools over stdio (JSON-RPC 2.0, protocol version 2024-11-05).
+
+### Tools
+- **ctt_search** — TF-IDF search across all domains (query, limit)
+- **ctt_execute** — Full autonomous pipeline: recall→plan→normalize→validate→execute→learn (goal, domain?)
+- **ctt_extract** — Extract Knowledge from a domain (domain)
+- **ctt_list_domains** — List registered domains with operation counts
+- **ctt_store_stats** — Store statistics (knowledge/skill/memory/profile counts)
+- **ctt_recall** — Build CTT context for a goal without executing (goal, compact?)
+
+### Usage with Claude Desktop / claude_desktop_config.json
+```json
+{
+  "mcpServers": {
+    "ctt-shell": {
+      "command": "node",
+      "args": ["dist/src/cli/cli.js", "mcp"],
+      "cwd": "/path/to/ctt-shell",
+      "env": {
+        "CF_API_KEY": "...",
+        "CF_ACCOUNT_ID": "..."
+      }
+    }
+  }
+}
+```
+
+### Content-Length framing
+Messages use `Content-Length: N\r\n\r\n{json}` framing per MCP spec. Logs go to stderr.
 
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain

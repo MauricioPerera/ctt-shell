@@ -19,6 +19,7 @@ import { WordPressAdapter, WP_EVAL_GOALS } from '../../domains/wordpress/index.j
 import { N8nAdapter, N8N_EVAL_GOALS } from '../../domains/n8n/index.js';
 import { contextToPrompt, recall } from '../agent/recall.js';
 import { CircuitBreaker } from '../guardrails/circuit-breaker.js';
+import { startMcpServer } from '../mcp/server.js';
 
 const CTT_ROOT = join(process.cwd(), '.ctt-shell');
 const STORE_ROOT = join(CTT_ROOT, 'store');
@@ -83,6 +84,7 @@ Commands:
   extract <domain>            Extract Knowledge from a domain
   status                      Show store statistics
   domain list                 List registered domains
+  mcp                         Start MCP server (stdio transport)
   help                        Show this help
 
 Options:
@@ -245,6 +247,11 @@ Environment:
       } else {
         console.error('Usage: ctt-shell domain list');
       }
+      break;
+    }
+
+    case 'mcp': {
+      await startMcpServer();
       break;
     }
 

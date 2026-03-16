@@ -175,7 +175,7 @@ export class MyAdapter implements DomainAdapter {
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 72 unit tests
+npm test                                         # Run 83 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -185,6 +185,7 @@ node dist/src/cli/cli.js eval --domain wordpress # Evaluate single domain
 node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
 node dist/src/cli/cli.js status                  # Store statistics
 node dist/src/cli/cli.js domain list             # List registered domains
+node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 ```
 
 ## Environment variables
@@ -221,6 +222,7 @@ src/
   agent/          → Autonomous pipeline (recall→plan→normalize→validate→execute→learn)
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry
+  mcp/            → MCP server (6 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain (7 operations, 5 eval goals)
@@ -228,8 +230,43 @@ domains/
   wordpress/      → WordPress REST API (20+ endpoints, 6 goals)
   n8n/            → n8n workflow automation (17+ node types, 6 goals)
 tests/
-  unit/           → 72 unit tests (store, search, normalizers, adapters)
+  unit/           → 83 unit tests (store, search, normalizers, adapters, MCP)
 ```
+
+## MCP server
+
+ctt-shell exposes its full pipeline as 6 MCP tools over stdio:
+
+| Tool | Description |
+|------|-------------|
+| `ctt_search` | TF-IDF search across all domains |
+| `ctt_execute` | Full autonomous pipeline (recall → plan → execute → learn) |
+| `ctt_extract` | Extract Knowledge from a domain |
+| `ctt_list_domains` | List registered domains with operation counts |
+| `ctt_store_stats` | Store statistics |
+| `ctt_recall` | Build CTT context for a goal (without executing) |
+
+### Claude Desktop integration
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ctt-shell": {
+      "command": "node",
+      "args": ["dist/src/cli/cli.js", "mcp"],
+      "cwd": "/path/to/ctt-shell",
+      "env": {
+        "CF_API_KEY": "your-key",
+        "CF_ACCOUNT_ID": "your-account"
+      }
+    }
+  }
+}
+```
+
+This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 4 domains.
 
 ## Tests
 
@@ -237,12 +274,13 @@ tests/
 npm run build && npm test
 ```
 
-72 tests covering:
+83 tests covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Response normalizer** (12) — JSON extraction, truncation recovery, thinking tags
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
 - **Domain adapters** (35) — all 4 adapters: knowledge, validation, execution, normalizers
+- **MCP server** (11) — protocol handshake, tool listing, all 6 tools, error handling
 
 ## How CTT works
 
