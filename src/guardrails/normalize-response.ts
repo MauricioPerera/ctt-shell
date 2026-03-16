@@ -42,12 +42,30 @@ export function normalizeResponse(raw: string): NormalizeResult {
   const genericFence = text.match(/```\s*([\s\S]*?)```/);
   let jsonStr = jsonFence?.[1]?.trim() ?? genericFence?.[1]?.trim() ?? null;
 
+  // If no closed code fence, try unclosed (truncated response)
+  if (!jsonStr) {
+    const unclosedFence = text.match(/```(?:json)?\s*([\s\S]+)/);
+    if (unclosedFence) {
+      jsonStr = unclosedFence[1].trim();
+      fixes.push('extracted JSON from unclosed code fence');
+    }
+  }
+
   // If no code fence, try to find raw JSON object
   if (!jsonStr) {
     const braceMatch = text.match(/\{[\s\S]*\}/);
     if (braceMatch) {
       jsonStr = braceMatch[0];
       fixes.push('extracted JSON from raw text');
+    }
+  }
+
+  // Last resort: find opening brace without closing (truncated)
+  if (!jsonStr) {
+    const braceStart = text.match(/\{[\s\S]*/);
+    if (braceStart) {
+      jsonStr = braceStart[0];
+      fixes.push('extracted truncated JSON from raw text');
     }
   }
 
@@ -136,6 +154,7 @@ function fixQuotes(str: string): string {
 
 /**
  * Attempt to auto-close truncated JSON by counting brackets.
+ * Also closes dangling strings and removes incomplete key-value pairs.
  */
 function autoCloseJson(str: string): string | null {
   let braces = 0;
@@ -156,10 +175,41 @@ function autoCloseJson(str: string): string | null {
     }
   }
 
-  if (braces === 0 && brackets === 0) return null; // Already balanced
+  if (braces === 0 && brackets === 0 && !inString) return null; // Already balanced
+
+  let result = str;
+
+  // Close dangling string — truncate to last complete JSON element
+  if (inString) {
+    // Strategy: find the last complete step object by looking for "},\n" or "}\n"
+    // and truncate everything after it
+    const lastCompleteObj = Math.max(
+      result.lastIndexOf('},'),
+      result.lastIndexOf('}\n'),
+    );
+    if (lastCompleteObj > 0) {
+      result = result.slice(0, lastCompleteObj + 1);
+    } else {
+      result += '"';
+    }
+    // Recount after truncation
+    braces = 0; brackets = 0; inString = false;
+    for (let i = 0; i < result.length; i++) {
+      const ch = result[i];
+      const prev = i > 0 ? result[i - 1] : '';
+      if (ch === '"' && prev !== '\\') inString = !inString;
+      else if (!inString) {
+        if (ch === '{') braces++;
+        else if (ch === '}') braces--;
+        else if (ch === '[') brackets++;
+        else if (ch === ']') brackets--;
+      }
+    }
+    if (inString) result += '"';
+  }
 
   // Remove trailing comma before closing
-  let result = str.replace(/,\s*$/, '');
+  result = result.replace(/,\s*$/, '');
 
   // Close open brackets/braces
   while (brackets > 0) { result += ']'; brackets--; }

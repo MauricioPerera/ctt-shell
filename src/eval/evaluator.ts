@@ -101,38 +101,48 @@ export class ModelEvaluator {
     }
 
     const start = Date.now();
+    const maxAttempts = isSmall ? 2 : 1;
 
-    try {
-      const response = await llm.chat(messages, { temperature: 0.1, maxTokens: 4096 });
-      result.latencyMs = Date.now() - start;
-      result.rawResponse = response.content;
-      result.inputTokens = response.usage?.inputTokens ?? 0;
-      result.outputTokens = response.usage?.outputTokens ?? 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await llm.chat(messages, { temperature: 0.1, maxTokens: 4096 });
+        result.latencyMs = Date.now() - start;
+        result.rawResponse = response.content;
+        result.inputTokens += response.usage?.inputTokens ?? 0;
+        result.outputTokens += response.usage?.outputTokens ?? 0;
 
-      // JSON extraction
-      const normalized = normalizeResponse(response.content);
-      if (!normalized.json) return result;
-      result.jsonValid = true;
+        // JSON extraction
+        const normalized = normalizeResponse(response.content);
+        if (!normalized.json) {
+          if (attempt < maxAttempts - 1) {
+            messages.push({ role: 'assistant', content: response.content });
+            messages.push({ role: 'user', content: 'Response was truncated. Be more concise: short descriptions, no extra fields. JSON only.' });
+            continue;
+          }
+          break;
+        }
+        result.jsonValid = true;
 
-      // Parse plan
-      const plan = JSON.parse(normalized.json) as ExecutionPlan;
-      if (!plan.goal && !plan.steps) return result;
-      // Accept if has steps even without goal
-      if (!plan.steps || !Array.isArray(plan.steps)) return result;
-      if (!plan.goal) plan.goal = goal.goal;
-      result.planValid = true;
+        // Parse plan
+        const plan = JSON.parse(normalized.json) as ExecutionPlan;
+        if (!plan.goal && !plan.steps) break;
+        if (!plan.steps || !Array.isArray(plan.steps)) break;
+        if (!plan.goal) plan.goal = goal.goal;
+        result.planValid = true;
 
-      // Normalize
-      const { plan: normalizedPlan, fixes } = normalizePlan(plan);
-      result.normalizeFixes = fixes;
-      result.stepCount = normalizedPlan.steps.length;
+        // Normalize
+        const { plan: normalizedPlan, fixes } = normalizePlan(plan);
+        result.normalizeFixes = fixes;
+        result.stepCount = normalizedPlan.steps.length;
 
-      // Basic validation: all steps have operationId and params
-      const valid = normalizedPlan.steps.every(s => s.operationId && s.params);
-      result.compositionPassed = valid && normalizedPlan.steps.length > 0;
+        // Basic validation: all steps have operationId and params
+        const valid = normalizedPlan.steps.every(s => s.operationId && s.params);
+        result.compositionPassed = valid && normalizedPlan.steps.length > 0;
+        break;
 
-    } catch {
-      result.latencyMs = Date.now() - start;
+      } catch {
+        result.latencyMs = Date.now() - start;
+      }
     }
 
     return result;
