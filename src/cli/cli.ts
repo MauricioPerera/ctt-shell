@@ -14,6 +14,9 @@ import { ModelEvaluator } from '../eval/evaluator.js';
 import { createProvider } from '../llm/provider.js';
 import type { ProviderType } from '../llm/provider.js';
 import { EchoAdapter, ECHO_EVAL_GOALS } from '../../domains/echo/adapter.js';
+import { BrowserAdapter, BROWSER_EVAL_GOALS } from '../../domains/browser/index.js';
+import { WordPressAdapter, WP_EVAL_GOALS } from '../../domains/wordpress/index.js';
+import { N8nAdapter, N8N_EVAL_GOALS } from '../../domains/n8n/index.js';
 import { contextToPrompt, recall } from '../agent/recall.js';
 import { CircuitBreaker } from '../guardrails/circuit-breaker.js';
 
@@ -38,9 +41,11 @@ function createInfra() {
   const search = new SearchEngine();
   const domains = new DomainRegistry(store, search);
 
-  // Register echo domain by default
-  const echo = new EchoAdapter();
-  domains.register(echo);
+  // Register domains
+  domains.register(new EchoAdapter());
+  domains.register(new BrowserAdapter());
+  domains.register(new WordPressAdapter());
+  domains.register(new N8nAdapter());
 
   // Load and index existing entities
   domains.rebuildIndex();
@@ -162,8 +167,28 @@ Environment:
           })
         : [{ name: 'ollama-default', provider: 'ollama' as ProviderType, config: { model: process.env.OLLAMA_MODEL || 'qwen2.5:3b' } }];
 
-      // Extract echo knowledge for eval
-      await domains.extractKnowledge('echo');
+      // Determine which goals to use
+      const domainFlag2 = args.indexOf('--domain');
+      const evalDomain = domainFlag2 >= 0 ? args[domainFlag2 + 1] : undefined;
+
+      const goalsByDomain: Record<string, typeof ECHO_EVAL_GOALS> = {
+        echo: ECHO_EVAL_GOALS,
+        browser: BROWSER_EVAL_GOALS,
+        wordpress: WP_EVAL_GOALS,
+        n8n: N8N_EVAL_GOALS,
+      };
+
+      let evalGoals: typeof ECHO_EVAL_GOALS;
+      if (evalDomain && goalsByDomain[evalDomain]) {
+        await domains.extractKnowledge(evalDomain);
+        evalGoals = goalsByDomain[evalDomain];
+      } else {
+        // All domains
+        for (const d of Object.keys(goalsByDomain)) {
+          await domains.extractKnowledge(d);
+        }
+        evalGoals = Object.values(goalsByDomain).flat();
+      }
 
       // Generate context for goals
       const circuitBreaker = new CircuitBreaker(store);
@@ -174,11 +199,11 @@ Environment:
         },
       });
 
-      console.log(`Running eval: ${ECHO_EVAL_GOALS.length} goals x ${modelConfigs.length} models`);
+      console.log(`Running eval: ${evalGoals.length} goals x ${modelConfigs.length} models`);
       console.log('');
 
       const report = await evaluator.runAll(
-        ECHO_EVAL_GOALS,
+        evalGoals,
         modelConfigs,
         (model) => createProvider(model.provider, model.config),
       );
