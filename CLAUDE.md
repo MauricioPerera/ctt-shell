@@ -31,7 +31,8 @@ src/
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry for small models
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
-  mcp/            → MCP server (7 tools, stdio JSON-RPC 2.0)
+  context/        → Context Loader (user-provided business knowledge ingestion)
+  mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain adapter (7 operations, 5 eval goals)
@@ -47,7 +48,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 149 unit tests
+npm test                                         # Run 167 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -56,6 +57,12 @@ node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js status                  # Store stats
 node dist/src/cli/cli.js domain list             # List registered domains
+node dist/src/cli/cli.js context add file.md     # Load business context from file
+node dist/src/cli/cli.js context add --text "…"  # Add inline context text
+node dist/src/cli/cli.js context list            # List loaded context entries
+node dist/src/cli/cli.js context remove <id>     # Remove a context entry
+node dist/src/cli/cli.js context clear           # Remove all context entries
+node dist/src/cli/cli.js context load-dir [dir]  # Load all files from directory
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 ```
 
@@ -212,6 +219,7 @@ Exposes CTT pipeline + shell as MCP tools over stdio (JSON-RPC 2.0, protocol ver
 - **ctt_store_stats** — Store statistics (knowledge/skill/memory/profile counts)
 - **ctt_recall** — Build CTT context for a goal without executing (goal, compact?)
 - **ctt_shell** — Execute shell commands with RBAC policy (command, role?, cwd?, validate_only?)
+- **ctt_context** — Manage user-provided business context (add_text, add_file, list, remove, clear, load_dir)
 
 ### Usage with Claude Desktop / claude_desktop_config.json
 ```json
@@ -232,6 +240,35 @@ Exposes CTT pipeline + shell as MCP tools over stdio (JSON-RPC 2.0, protocol ver
 
 ### Content-Length framing
 Messages use `Content-Length: N\r\n\r\n{json}` framing per MCP spec. Logs go to stderr.
+
+## Context Loader (src/context/)
+User-provided business knowledge that enriches LLM prompts with domain-specific background.
+
+### How it works
+- Files (.md, .txt, .json) or inline text → Knowledge entities with `domainId: 'context'`
+- Markdown files split by `##` headers → each section is independently searchable via TF-IDF
+- JSON files support bulk import (array of `{title, content, category?, tags?}`)
+- Context entities appear in RECALL results under "## Background Context" (separate from domain operations)
+- Auto-loaded from `.ctt-shell/context/` directory on MCP server startup
+
+### File format examples
+```markdown
+# Company Info              ← becomes document title
+## Pricing                  ← separate Knowledge entity: "Company Info — Pricing"
+Basic plan $29/month...
+## Support                  ← separate Knowledge entity: "Company Info — Support"
+24/7 email support...
+```
+
+```json
+[
+  {"title": "Return Policy", "content": "30-day returns...", "category": "policy"},
+  {"title": "Pricing", "content": "Basic $29, Premium $99...", "category": "pricing"}
+]
+```
+
+### Context directory
+Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/MCP.
 
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain

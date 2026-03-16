@@ -55,5 +55,9 @@ export type { ShellCommand, ParseResult } from './shell/parser.js';
 export { AuditLog } from './shell/audit.js';
 export type { AuditEntry } from './shell/audit.js';
 
+// Context
+export { ContextLoader } from './context/loader.js';
+export type { ContextEntry } from './context/loader.js';
+
 // MCP
 export { McpServer, startMcpServer } from './mcp/server.js';

@@ -22,6 +22,7 @@ import { GitAdapter, GIT_EVAL_GOALS } from '../../domains/git/index.js';
 import { contextToPrompt, recall } from '../agent/recall.js';
 import { CircuitBreaker } from '../guardrails/circuit-breaker.js';
 import { startMcpServer } from '../mcp/server.js';
+import { ContextLoader } from '../context/loader.js';
 
 const CTT_ROOT = join(process.cwd(), '.ctt-shell');
 const STORE_ROOT = join(CTT_ROOT, 'store');
@@ -88,6 +89,11 @@ Commands:
   extract <domain>            Extract Knowledge from a domain
   status                      Show store statistics
   domain list                 List registered domains
+  context add <file|--text>   Load business context from file or inline text
+  context list                List loaded context entries
+  context remove <id>         Remove a context entry
+  context clear               Remove all context entries
+  context load-dir [path]     Load all files from context directory
   mcp                         Start MCP server (stdio transport)
   help                        Show this help
 
@@ -252,6 +258,76 @@ Environment:
         }
       } else {
         console.error('Usage: ctt-shell domain list');
+      }
+      break;
+    }
+
+    case 'context': {
+      const contextLoader = new ContextLoader(store, search);
+      const sub = args[1];
+
+      if (sub === 'add') {
+        const textFlag = args.indexOf('--text');
+        const categoryFlag = args.indexOf('--category');
+        const category = categoryFlag >= 0 ? args[categoryFlag + 1] : undefined;
+        const tagsFlag = args.indexOf('--tags');
+        const tags = tagsFlag >= 0 ? args[tagsFlag + 1].split(',') : [];
+
+        if (textFlag >= 0) {
+          // Inline text: context add --text "some text" [--category pricing] [--tags a,b]
+          const text = args[textFlag + 1];
+          if (!text) { console.error('Usage: ctt-shell context add --text "your text"'); process.exit(1); }
+          const entry = contextLoader.addText(text, tags, category);
+          contextLoader.rebuildIndex();
+          console.log(`Added context: "${entry.displayName}" (${entry.id})`);
+        } else {
+          // File: context add <filepath> [--category docs] [--tags a,b]
+          const filePath = args[2];
+          if (!filePath || filePath.startsWith('--')) { console.error('Usage: ctt-shell context add <file> or context add --text "..."'); process.exit(1); }
+          const entries = contextLoader.loadFile(filePath);
+          contextLoader.rebuildIndex();
+          console.log(`Loaded ${entries.length} context entries from "${filePath}"`);
+          for (const e of entries) {
+            console.log(`  ${e.id}: ${e.displayName}`);
+          }
+        }
+      } else if (sub === 'list') {
+        const entries = contextLoader.list();
+        if (entries.length === 0) {
+          console.log('No context entries loaded. Use "ctt-shell context add" to add some.');
+        } else {
+          console.log(`Context entries (${entries.length}):`);
+          for (const e of entries) {
+            const preview = e.description.slice(0, 80).replace(/\n/g, ' ');
+            const source = e.metadata?.source ? ` [${e.metadata.source}]` : '';
+            console.log(`  ${e.id}: ${e.displayName}${source}`);
+            console.log(`    ${preview}${e.description.length > 80 ? '...' : ''}`);
+          }
+        }
+      } else if (sub === 'remove') {
+        const id = args[2];
+        if (!id) { console.error('Usage: ctt-shell context remove <id>'); process.exit(1); }
+        const removed = contextLoader.remove(id);
+        if (removed) {
+          contextLoader.rebuildIndex();
+          console.log(`Removed context entry: ${id}`);
+        } else {
+          console.error(`Context entry not found: ${id}`);
+        }
+      } else if (sub === 'clear') {
+        const count = contextLoader.clear();
+        contextLoader.rebuildIndex();
+        console.log(`Cleared ${count} context entries.`);
+      } else if (sub === 'load-dir') {
+        const dir = args[2] || join(CTT_ROOT, 'context');
+        const entries = contextLoader.loadDirectory(dir);
+        contextLoader.rebuildIndex();
+        console.log(`Loaded ${entries.length} context entries from "${dir}"`);
+        for (const e of entries) {
+          console.log(`  ${e.id}: ${e.displayName}`);
+        }
+      } else {
+        console.error('Usage: ctt-shell context <add|list|remove|clear|load-dir>');
       }
       break;
     }

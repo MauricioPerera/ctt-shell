@@ -58,9 +58,27 @@ export function recall(
 export function contextToPrompt(ctx: CTTContext, compact = false): string {
   const sections: string[] = [];
 
-  if (ctx.knowledge.length > 0) {
+  // Separate user context from domain operations
+  const contextKnowledge = ctx.knowledge.filter(k => k.domainId === 'context');
+  const domainKnowledge = ctx.knowledge.filter(k => k.domainId !== 'context');
+
+  // User-provided business context first (gives LLM background info)
+  if (contextKnowledge.length > 0) {
+    sections.push('## Background Context');
+    for (const k of contextKnowledge) {
+      if (compact) {
+        sections.push(`- ${k.displayName}: ${k.description.slice(0, 200)}`);
+      } else {
+        sections.push(`### ${k.displayName}`);
+        sections.push(k.description);
+      }
+    }
+    sections.push('');
+  }
+
+  if (domainKnowledge.length > 0) {
     sections.push('## Available Operations');
-    for (const k of ctx.knowledge) {
+    for (const k of domainKnowledge) {
       if (compact) {
         // One-line format for small models
         const params = k.parameters

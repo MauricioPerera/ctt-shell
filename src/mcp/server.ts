@@ -34,6 +34,7 @@ import { WordPressAdapter } from '../../domains/wordpress/index.js';
 import { N8nAdapter } from '../../domains/n8n/index.js';
 import { WpCliAdapter } from '../../domains/wp-cli/index.js';
 import { GitAdapter } from '../../domains/git/index.js';
+import { ContextLoader } from '../context/loader.js';
 
 // ─── JSON-RPC 2.0 Types ─────────────────────────────────────────────────────
 
@@ -141,6 +142,24 @@ const TOOLS = [
       required: ['command'],
     },
   },
+  {
+    name: 'ctt_context',
+    description: 'Manage user-provided business context (knowledge base). Add text, load files, list entries, or remove context that enriches LLM prompts with domain-specific background information.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', description: 'Action to perform', enum: ['add_text', 'add_file', 'list', 'remove', 'clear', 'load_dir'] },
+        text: { type: 'string', description: 'Text content to add (for add_text action)' },
+        title: { type: 'string', description: 'Title for the context entry (optional for add_text)' },
+        file: { type: 'string', description: 'File path to load (for add_file action)' },
+        directory: { type: 'string', description: 'Directory path (for load_dir action, default: .ctt-shell/context/)' },
+        id: { type: 'string', description: 'Entry ID to remove (for remove action)' },
+        category: { type: 'string', description: 'Category for grouping (e.g., product, policy, faq)' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for search boosting' },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 // ─── Infrastructure Setup ────────────────────────────────────────────────────
@@ -172,7 +191,13 @@ function createInfra() {
   domains.register(new GitAdapter());
   domains.rebuildIndex();
 
-  return { store, search, domains };
+  // Auto-load user context from .ctt-shell/context/ if it exists
+  const contextLoader = new ContextLoader(store, search);
+  const contextDir = join(CTT_ROOT, 'context');
+  contextLoader.loadDirectory(contextDir);
+  contextLoader.rebuildIndex();
+
+  return { store, search, domains, contextLoader };
 }
 
 function getLlmProvider(): { provider: ProviderType; config: Record<string, unknown> } | null {
@@ -351,6 +376,64 @@ const handlers: Record<string, ToolHandler> = {
       denyReason: result.denyReason,
       truncated: result.truncated,
     };
+  },
+
+  async ctt_context(args, infra) {
+    const action = args.action as string;
+    const loader = infra.contextLoader;
+
+    switch (action) {
+      case 'add_text': {
+        const text = args.text as string;
+        if (!text) return { error: 'Missing "text" parameter' };
+        const title = args.title as string | undefined;
+        const category = args.category as string | undefined;
+        const tags = (args.tags as string[]) || [];
+        const entry = loader.addText(text, tags, category, title);
+        loader.rebuildIndex();
+        return { id: entry.id, title: entry.displayName, message: 'Context entry added' };
+      }
+      case 'add_file': {
+        const file = args.file as string;
+        if (!file) return { error: 'Missing "file" parameter' };
+        const entries = loader.loadFile(file);
+        loader.rebuildIndex();
+        return { count: entries.length, entries: entries.map(e => ({ id: e.id, title: e.displayName })) };
+      }
+      case 'list': {
+        const entries = loader.list();
+        return {
+          count: entries.length,
+          entries: entries.map(e => ({
+            id: e.id,
+            title: e.displayName,
+            category: e.category,
+            preview: e.description.slice(0, 120),
+            source: e.metadata?.source,
+          })),
+        };
+      }
+      case 'remove': {
+        const id = args.id as string;
+        if (!id) return { error: 'Missing "id" parameter' };
+        const removed = loader.remove(id);
+        if (removed) loader.rebuildIndex();
+        return { removed, id };
+      }
+      case 'clear': {
+        const count = loader.clear();
+        loader.rebuildIndex();
+        return { cleared: count };
+      }
+      case 'load_dir': {
+        const dir = (args.directory as string) || join(CTT_ROOT, 'context');
+        const entries = loader.loadDirectory(dir);
+        loader.rebuildIndex();
+        return { count: entries.length, directory: dir, entries: entries.map(e => ({ id: e.id, title: e.displayName })) };
+      }
+      default:
+        return { error: `Unknown action: ${action}. Use: add_text, add_file, list, remove, clear, load_dir` };
+    }
   },
 };
 

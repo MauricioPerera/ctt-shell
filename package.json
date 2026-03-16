@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node --test dist/tests/unit/domain-adapters.test.js dist/tests/unit/mcp-server.test.js dist/tests/unit/normalize-plan.test.js dist/tests/unit/normalize-response.test.js dist/tests/unit/shell.test.js dist/tests/unit/store.test.js dist/tests/unit/tfidf.test.js",
+    "test": "node --test dist/tests/unit/domain-adapters.test.js dist/tests/unit/mcp-server.test.js dist/tests/unit/normalize-plan.test.js dist/tests/unit/normalize-response.test.js dist/tests/unit/shell.test.js dist/tests/unit/store.test.js dist/tests/unit/tfidf.test.js dist/tests/unit/context-loader.test.js",
     "clean": "rm -rf dist",
     "start": "node dist/cli/cli.js"
   },

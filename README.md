@@ -462,16 +462,20 @@ npm run build && npm test
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 149 unit tests
+npm test                                         # Run 167 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous: recall → plan → execute → learn
-node dist/src/cli/cli.js eval                    # Evaluate all 23 goals across all domains
+node dist/src/cli/cli.js eval                    # Evaluate all 33 goals across all domains
 node dist/src/cli/cli.js eval --domain wordpress # Evaluate single domain
 node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
 node dist/src/cli/cli.js status                  # Store statistics
 node dist/src/cli/cli.js domain list             # List registered domains
+node dist/src/cli/cli.js context add info.md     # Load business context from file
+node dist/src/cli/cli.js context add --text "…"  # Add inline context text
+node dist/src/cli/cli.js context list            # List loaded context entries
+node dist/src/cli/cli.js context clear           # Remove all context entries
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 ```
 
@@ -510,7 +514,8 @@ src/
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
-  mcp/            → MCP server (7 tools, stdio JSON-RPC 2.0)
+  context/        → Context Loader (user-provided business knowledge ingestion)
+  mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain (7 operations, 5 eval goals)
@@ -520,12 +525,12 @@ domains/
   wp-cli/         → WordPress via WP-CLI terminal (25+ ops, 5 goals)
   git/            → Git version control (28 ops, 5 goals)
 tests/
-  unit/           → 149 unit tests (store, search, normalizers, adapters, MCP, shell)
+  unit/           → 167 unit tests (store, search, normalizers, adapters, MCP, shell, context)
 ```
 
 ## MCP server
 
-ctt-shell exposes its full pipeline as 7 MCP tools over stdio:
+ctt-shell exposes its full pipeline as 8 MCP tools over stdio:
 
 | Tool | Description |
 |------|-------------|
@@ -536,6 +541,7 @@ ctt-shell exposes its full pipeline as 7 MCP tools over stdio:
 | `ctt_store_stats` | Store statistics |
 | `ctt_recall` | Build CTT context for a goal (without executing) |
 | `ctt_shell` | Execute shell commands with RBAC policy enforcement |
+| `ctt_context` | Manage user-provided business context (add, list, remove, load) |
 
 ### Claude Desktop integration
 
@@ -557,7 +563,43 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 4 domains.
+This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 6 domains.
+
+## Context loader (business knowledge)
+
+Load domain-specific business context that enriches LLM prompts. Context entries are indexed by TF-IDF and appear in RECALL results alongside domain operations.
+
+```bash
+# Load a markdown file (splits by ## headers into separate searchable entries)
+node dist/src/cli/cli.js context add docs/products.md
+
+# Add inline text
+node dist/src/cli/cli.js context add --text "Premium plan costs $99/month" --category pricing
+
+# Load all files from a directory
+node dist/src/cli/cli.js context load-dir .ctt-shell/context/
+
+# List and manage
+node dist/src/cli/cli.js context list
+node dist/src/cli/cli.js context remove <id>
+node dist/src/cli/cli.js context clear
+```
+
+Supported file types: `.md` (split by `##` headers), `.txt` (single entry), `.json` (structured bulk import).
+
+Files placed in `.ctt-shell/context/` are auto-loaded on MCP server startup.
+
+Context appears in LLM prompts under **"## Background Context"**, separate from domain operations:
+
+```
+## Background Context
+### Company Info — Pricing
+Basic plan $29/month, Premium $99/month...
+
+## Available Operations
+### Create Post (POST:/wp/v2/posts)
+...
+```
 
 ## Tests
 
@@ -565,14 +607,15 @@ This lets Claude (or any MCP client) search operations, compose plans, execute w
 npm run build && npm test
 ```
 
-149 tests covering:
+167 tests covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Response normalizer** (12) — JSON extraction, truncation recovery, thinking tags
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
 - **Domain adapters** (67) — all 6 adapters: knowledge, validation, execution, normalizers
-- **MCP server** (11) — protocol handshake, tool listing, all 7 tools, error handling
+- **MCP server** (11) — protocol handshake, tool listing, all 8 tools, error handling
 - **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
+- **Context loader** (18) — addText, loadFile (markdown/json/txt), loadDirectory, list/remove/clear, TF-IDF integration
 
 ## How CTT works
 
