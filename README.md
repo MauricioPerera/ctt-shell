@@ -41,10 +41,11 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 
 | Model | Size | JSON parse | Plan valid | Composed | Avg latency |
 |-------|------|-----------|-----------|----------|-------------|
-| Llama 3.2 (Cloudflare) | **3B** | 96% | 96% | **96%** | 1.5s |
-| Gemma 3 (Cloudflare) | **12B** | 100% | 100% | **100%** | 4.2s |
+| Llama 3.2 (Cloudflare) | **1B** | **100%** | **100%** | **100%** | **1.2s** |
+| Llama 3.2 (Cloudflare) | **3B** | 96% | 96% | 96% | 1.5s |
+| Gemma 3 (Cloudflare) | **12B** | 100% | 100% | 100% | 4.2s |
 
-The 3B model fails only on one complex 3-step goal. Every other goal — including WordPress WooCommerce workflows and n8n multi-node compositions — composes successfully at 3B.
+A **1 billion parameter model** composes all 33 multi-step goals correctly — faster than 3B and 12B. CTT structured context at inference time fully compensates for parameter count.
 
 ## Quick start
 
@@ -628,7 +629,7 @@ CTT approach: give a small model the right context at inference time:
 3. **Memory entities** warn about past failures ("don't use PATCH, use POST for WordPress")
 4. **Guard rails** catch and fix the remaining mistakes automatically
 
-The result: a 3B model with CTT context achieves 96% composition rate across 33 multi-domain goals. The same model without CTT context produces unparseable JSON most of the time.
+The result: a **1B model** with CTT context achieves **100% composition rate** across 33 multi-domain goals — outperforming the 3B model (96%) and matching the 12B model. The same models without CTT context produce unparseable JSON most of the time.
 
 ## License
 

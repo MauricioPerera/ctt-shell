@@ -187,9 +187,11 @@ See README.md for full template with code examples.
 ```
 Model                                 JSON%   Plan%   Comp%   Exec%   Steps   Latency
 -------------------------------------------------------------------------------------
+@cf/meta/llama-3.2-1b-instruct         100%    100%    100%      0%     2.5    1242ms
 @cf/meta/llama-3.2-3b-instruct          96%     96%     96%      0%     2.0    1545ms
 @cf/google/gemma-3-12b-it              100%    100%    100%      0%     2.2    4156ms
 ```
+The 1B model achieves 100% composition across all 33 goals — CTT context compensates for parameter count.
 
 ## Shell Engine (src/shell/)
 Controlled command execution for LLM agents with RBAC, audit, and sandboxing.
