@@ -2,7 +2,7 @@
 
 ## What is this
 Framework TypeScript that combines three proven architectures:
-- **Agent-Shell**: 2-tool MCP execution engine (registry, parser, pipelines, RBAC, audit)
+- **Agent-Shell**: Controlled terminal for LLM agents (parser, executor, RBAC policy, audit log)
 - **CTT Memory**: Entity-based persistent memory (Knowledge, Skills, Memories, Profiles) with content-addressable store
 - **a2e Guard Rails**: Normalizers, circuit breaker, inline retry, few-shot learning — proven to make 3B models match 12B
 
@@ -15,7 +15,7 @@ Agent Layer      → Autonomous | Interactive | Eval Runner
 Guard Rails      → Response Normalizer | Plan Normalizer | Circuit Breaker | Inline Retry | Sanitizer
 Domain Layer     → DomainRegistry | DomainAdapter interface | Knowledge Resolver
 CTT Memory       → Store (SHA-256) | Search (TF-IDF) | Skills Lifecycle
-Shell Engine     → Command Registry | Parser (AST) | Executor | Pipelines | RBAC | Audit
+Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audit Log
 ```
 
 ## Project structure
@@ -45,6 +45,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
+npm test                                         # Run 117 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -199,4 +200,4 @@ Messages use `Content-Length: N\r\n\r\n{json}` framing per MCP spec. Logs go to 
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
 
 ## Zero runtime dependencies
-Only Node.js built-ins: crypto, fs, path, http. TypeScript for compilation only.
+Only Node.js built-ins: crypto, fs, path, http, child_process, readline. TypeScript for compilation only.
