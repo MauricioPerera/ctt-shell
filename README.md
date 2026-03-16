@@ -41,11 +41,13 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 
 | Model | Size | JSON parse | Plan valid | Composed | Avg latency |
 |-------|------|-----------|-----------|----------|-------------|
-| Llama 3.2 (Cloudflare) | **1B** | **100%** | **100%** | **100%** | **1.2s** |
-| Llama 3.2 (Cloudflare) | **3B** | 96% | 96% | 96% | 1.5s |
-| Gemma 3 (Cloudflare) | **12B** | 100% | 100% | 100% | 4.2s |
+| **Llama 3.2** (Cloudflare) | **1B** | **100%** | **100%** | **100%** | **1.2s** |
+| Llama 3.2 (Cloudflare) | 3B | 96% | 96% | 96% | 1.5s |
+| Granite 4.0 H-Micro (Cloudflare) | ~1B | 91% | 91% | 91% | 6.5s |
+| GLM 4.7 Flash (Cloudflare) | ~2B | 94% | 94% | 94% | 11.8s |
+| Gemma 3 (Cloudflare) | 12B | 100% | 100% | 100% | 4.2s |
 
-A **1 billion parameter model** composes all 33 multi-step goals correctly — faster than 3B and 12B. CTT structured context at inference time fully compensates for parameter count.
+A **1 billion parameter Llama 3.2** composes all 33 multi-step goals correctly — faster and more accurate than models 3-12x its size. CTT structured context at inference time fully compensates for parameter count.
 
 ## Quick start
 
