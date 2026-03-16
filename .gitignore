@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.ctt-shell/
+*.js.map
+*.d.ts.map
+.env
+.DS_Store
+Thumbs.db

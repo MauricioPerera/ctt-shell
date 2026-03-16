@@ -1,0 +1,42 @@
+{
+  "name": "ctt-shell",
+  "version": "0.1.0",
+  "description": "Universal AI agent framework: Agent-Shell execution + CTT memory + a2e guard rails",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "ctt-shell": "dist/cli/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test dist/tests/**/*.test.js",
+    "clean": "rm -rf dist",
+    "start": "node dist/cli/cli.js"
+  },
+  "keywords": [
+    "ctt",
+    "context-time-training",
+    "ai-agent",
+    "mcp",
+    "llm",
+    "guard-rails",
+    "small-models"
+  ],
+  "author": "MauricioPerera",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.4.0"
+  }
+}
