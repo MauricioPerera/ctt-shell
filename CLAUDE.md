@@ -30,7 +30,8 @@ src/
                + recall (TF-IDF context builder) + learn (skill lifecycle)
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry for small models
-  mcp/            → MCP server (6 tools, stdio JSON-RPC 2.0)
+  shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
+  mcp/            → MCP server (7 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain adapter (7 operations, 5 eval goals)
@@ -145,8 +146,25 @@ Model                                 JSON%   Plan%   Comp%   Exec%   Steps   La
 @cf/google/gemma-3-12b-it              100%    100%    100%      0%     2.2    4156ms
 ```
 
+## Shell Engine (src/shell/)
+Controlled command execution for LLM agents with RBAC, audit, and sandboxing.
+
+### Components
+- **Parser** — Tokenizes commands, handles quotes, pipes, env vars, redirects
+- **Policy (RBAC)** — 3 built-in roles: readonly, dev, admin. Each defines allowed commands, denied patterns, path restrictions, timeouts
+- **Executor** — Runs commands via child_process with policy enforcement, timeout, output limits
+- **Audit** — Immutable JSONL log of all executions (allowed + denied) with timing and output previews
+
+### Roles
+- **readonly**: ls, cat, grep, git status/log/diff — blocks rm, mv, npm, curl
+- **dev**: git, node, npm, curl, mkdir, cp, mv, sed, awk, jq — blocks sudo, rm -rf /, git push --force, npm publish
+- **admin**: all commands — still blocks rm -rf /, fork bombs, dd to devices
+
+### Audit log location
+`.ctt-shell/logs/shell-audit.jsonl` — JSONL format, one entry per line
+
 ## MCP Server (src/mcp/)
-Exposes CTT pipeline as MCP tools over stdio (JSON-RPC 2.0, protocol version 2024-11-05).
+Exposes CTT pipeline + shell as MCP tools over stdio (JSON-RPC 2.0, protocol version 2024-11-05).
 
 ### Tools
 - **ctt_search** — TF-IDF search across all domains (query, limit)
@@ -155,6 +173,7 @@ Exposes CTT pipeline as MCP tools over stdio (JSON-RPC 2.0, protocol version 202
 - **ctt_list_domains** — List registered domains with operation counts
 - **ctt_store_stats** — Store statistics (knowledge/skill/memory/profile counts)
 - **ctt_recall** — Build CTT context for a goal without executing (goal, compact?)
+- **ctt_shell** — Execute shell commands with RBAC policy (command, role?, cwd?, validate_only?)
 
 ### Usage with Claude Desktop / claude_desktop_config.json
 ```json

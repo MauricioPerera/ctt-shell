@@ -45,5 +45,15 @@ export { learnSkill, learnFromError, learnFix } from './agent/learn.js';
 export { ModelEvaluator } from './eval/evaluator.js';
 export type { EvalGoal, EvalModelConfig, EvalRunResult, EvalReport } from './eval/evaluator.js';
 
+// Shell Engine
+export { ShellExecutor, createExecutor } from './shell/executor.js';
+export type { ExecutorConfig, ShellResult } from './shell/executor.js';
+export { POLICIES, validateCommand } from './shell/policy.js';
+export type { ShellPolicy, ShellRole } from './shell/policy.js';
+export { parseCommand, flattenPipeline, commandToString } from './shell/parser.js';
+export type { ShellCommand, ParseResult } from './shell/parser.js';
+export { AuditLog } from './shell/audit.js';
+export type { AuditEntry } from './shell/audit.js';
+
 // MCP
 export { McpServer, startMcpServer } from './mcp/server.js';

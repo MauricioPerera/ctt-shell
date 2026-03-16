@@ -83,8 +83,20 @@ Agent Layer      → Autonomous | Interactive | Eval Runner
 Guard Rails      → Response Normalizer | Plan Normalizer | Circuit Breaker | Inline Retry | Sanitizer
 Domain Layer     → DomainRegistry | DomainAdapter interface | Knowledge Resolver
 CTT Memory       → Store (SHA-256) | Search (TF-IDF) | Skills Lifecycle
-Shell Engine     → Command Registry | Parser | Executor | Pipelines | RBAC | Audit
+Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audit Log
 ```
+
+### Shell engine
+
+The shell layer gives LLM agents controlled access to the terminal:
+
+- **Parser** — Tokenizes commands, handles quotes, pipes (`cmd1 | cmd2`), env vars (`KEY=val cmd`), detects redirects
+- **RBAC Policy** — Three built-in roles restrict what the agent can do:
+  - `readonly` — ls, cat, grep, git status/log/diff only
+  - `dev` — git, node, npm, curl, mkdir, sed, awk, jq (blocks sudo, rm -rf /, force push, npm publish)
+  - `admin` — all commands (still blocks rm -rf /, fork bombs)
+- **Executor** — Runs via `child_process.execSync` with timeout, output limits, path sandboxing
+- **Audit log** — Immutable JSONL log of every execution (allowed + denied) with timing and output previews
 
 ### CTT entity model
 
@@ -175,7 +187,7 @@ export class MyAdapter implements DomainAdapter {
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 83 unit tests
+npm test                                         # Run 117 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -222,7 +234,8 @@ src/
   agent/          → Autonomous pipeline (recall→plan→normalize→validate→execute→learn)
   llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
   eval/           → Model evaluation framework + inline retry
-  mcp/            → MCP server (6 tools, stdio JSON-RPC 2.0)
+  shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
+  mcp/            → MCP server (7 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain (7 operations, 5 eval goals)
@@ -230,12 +243,12 @@ domains/
   wordpress/      → WordPress REST API (20+ endpoints, 6 goals)
   n8n/            → n8n workflow automation (17+ node types, 6 goals)
 tests/
-  unit/           → 83 unit tests (store, search, normalizers, adapters, MCP)
+  unit/           → 117 unit tests (store, search, normalizers, adapters, MCP, shell)
 ```
 
 ## MCP server
 
-ctt-shell exposes its full pipeline as 6 MCP tools over stdio:
+ctt-shell exposes its full pipeline as 7 MCP tools over stdio:
 
 | Tool | Description |
 |------|-------------|
@@ -245,6 +258,7 @@ ctt-shell exposes its full pipeline as 6 MCP tools over stdio:
 | `ctt_list_domains` | List registered domains with operation counts |
 | `ctt_store_stats` | Store statistics |
 | `ctt_recall` | Build CTT context for a goal (without executing) |
+| `ctt_shell` | Execute shell commands with RBAC policy enforcement |
 
 ### Claude Desktop integration
 
@@ -274,13 +288,14 @@ This lets Claude (or any MCP client) search operations, compose plans, execute w
 npm run build && npm test
 ```
 
-83 tests covering:
+117 tests covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Response normalizer** (12) — JSON extraction, truncation recovery, thinking tags
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
 - **Domain adapters** (35) — all 4 adapters: knowledge, validation, execution, normalizers
-- **MCP server** (11) — protocol handshake, tool listing, all 6 tools, error handling
+- **MCP server** (11) — protocol handshake, tool listing, all 7 tools, error handling
+- **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
 
 ## How CTT works
 

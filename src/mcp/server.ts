@@ -11,12 +11,16 @@
  *  4. ctt_list_domains — List registered domains with operation counts
  *  5. ctt_store_stats  — Store statistics
  *  6. ctt_recall       — Build CTT context for a goal (without executing)
+ *  7. ctt_shell        — Execute shell commands with RBAC policy enforcement
  */
 
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { Store } from '../storage/store.js';
+import { createExecutor } from '../shell/executor.js';
+import { AuditLog } from '../shell/audit.js';
+import type { ShellRole } from '../shell/policy.js';
 import { SearchEngine } from '../search/tfidf.js';
 import { DomainRegistry } from '../domain/registry.js';
 import { AutonomousAgent } from '../agent/autonomous.js';
@@ -119,6 +123,20 @@ const TOOLS = [
         compact: { type: 'boolean', description: 'Use compact format for small models (default: false)' },
       },
       required: ['goal'],
+    },
+  },
+  {
+    name: 'ctt_shell',
+    description: 'Execute a shell command with RBAC policy enforcement, audit logging, and output capture. The command is validated against the configured role (readonly/dev/admin) before execution. Dangerous commands are blocked automatically.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: 'Shell command to execute (e.g., "ls -la", "git status", "npm test")' },
+        role: { type: 'string', description: 'RBAC role: "readonly" (safe reads only), "dev" (development commands), "admin" (all commands). Default: "dev"', enum: ['readonly', 'dev', 'admin'] },
+        cwd: { type: 'string', description: 'Working directory (default: current directory)' },
+        validate_only: { type: 'boolean', description: 'If true, only validate the command without executing it (default: false)' },
+      },
+      required: ['command'],
     },
   },
 ];
@@ -293,6 +311,41 @@ const handlers: Record<string, ToolHandler> = {
       })),
       antiPatterns: ctx.antiPatterns,
       prompt: contextToPrompt(ctx, compact),
+    };
+  },
+
+  async ctt_shell(args) {
+    const command = args.command as string;
+    const role = (args.role as ShellRole) || 'dev';
+    const cwd = (args.cwd as string) || process.cwd();
+    const validateOnly = (args.validate_only as boolean) ?? false;
+
+    const audit = new AuditLog(join(CTT_ROOT, 'logs'));
+    const executor = createExecutor(role, cwd, audit);
+
+    if (validateOnly) {
+      const check = executor.validate(command);
+      return {
+        command,
+        role,
+        allowed: check.allowed,
+        reason: check.reason,
+        warnings: check.warnings,
+      };
+    }
+
+    const result = executor.exec(command);
+    return {
+      executed: result.executed,
+      exitCode: result.exitCode,
+      stdout: result.stdout.slice(0, 50_000), // Limit for MCP response
+      stderr: result.stderr.slice(0, 10_000),
+      durationMs: result.durationMs,
+      command: result.command,
+      role,
+      denied: result.denyReason ? true : undefined,
+      denyReason: result.denyReason,
+      truncated: result.truncated,
     };
   },
 };
