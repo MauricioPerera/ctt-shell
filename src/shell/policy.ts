@@ -63,6 +63,7 @@ export const POLICIES: Record<ShellRole, ShellPolicy> = {
       'curl', 'wget',
       'tar', 'unzip', 'gzip',
       'diff', 'sort', 'uniq', 'cut', 'tr', 'sed', 'awk', 'jq',
+      'wp',
     ],
     deniedPatterns: [
       /rm\s+-rf\s+\//i,        // rm -rf / (root)

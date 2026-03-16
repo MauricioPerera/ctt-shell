@@ -69,7 +69,7 @@ describe('McpServer', () => {
 
   // ─── Tools ────────────────────────────────────────────────────────────────
 
-  it('ctt_list_domains returns 4 registered domains', async () => {
+  it('ctt_list_domains returns 6 registered domains', async () => {
     const res = await server.handleRequest({
       jsonrpc: '2.0',
       id: 4,
@@ -81,9 +81,9 @@ describe('McpServer', () => {
     const result = res.result as { content: Array<{ type: string; text: string }> };
     assert.equal(result.content[0].type, 'text');
     const domains = JSON.parse(result.content[0].text) as Array<{ id: string; name: string }>;
-    assert.equal(domains.length, 4);
+    assert.equal(domains.length, 6);
     const ids = domains.map(d => d.id).sort();
-    assert.deepEqual(ids, ['browser', 'echo', 'n8n', 'wordpress']);
+    assert.deepEqual(ids, ['browser', 'echo', 'git', 'n8n', 'wordpress', 'wp-cli']);
   });
 
   it('ctt_store_stats returns entity counts', async () => {

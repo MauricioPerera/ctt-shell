@@ -38,6 +38,8 @@ domains/
   browser/        → Chrome CDP via PinchTab (16 operations, 6 eval goals)
   wordpress/      → WordPress REST API (20 built-in + live discovery, 6 eval goals)
   n8n/            → n8n workflow automation (17 built-in + live extraction, 6 eval goals)
+  wp-cli/         → WordPress via WP-CLI terminal commands (25 built-in + live discovery, 5 eval goals)
+  git/            → Git via terminal commands (28 built-in operations, 5 eval goals)
 tests/            → Unit tests
 contracts/        → Specification contracts
 ```
@@ -45,7 +47,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 117 unit tests
+npm test                                         # Run 149 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -95,6 +97,21 @@ interface DomainAdapter {
 }
 ```
 
+### Adding a new CLI adapter (checklist)
+1. Create `domains/<tool>/adapter.ts` — implement DomainAdapter using Shell Engine
+2. Create `domains/<tool>/index.ts` — barrel exports
+3. Define Knowledge entities (operationId format: `<tool>.<resource>.<action>`)
+4. Implement `buildCommand()` — convert step params to CLI command string
+5. Implement `parseOutput()` — parse stdout (JSON preferred, text fallback)
+6. Add `queryExpansions()` (5-10 synonym mappings) and `planNormalizers()` (prefix fix, param rename)
+7. Add eval goals (3-5: simple, medium, complex)
+8. Register in `src/cli/cli.ts` (import + register + eval goals)
+9. Register in `src/mcp/server.ts` (import + register)
+10. Add binary to `src/shell/policy.ts` dev allowedCommands if not already there
+11. Add tests to `tests/unit/domain-adapters.test.ts`
+12. `npm run build && npm test`
+See README.md for full template with code examples.
+
 ### Echo (test domain)
 - 7 operations: CRUD items, links, notifications
 - Execution echoes params back — for testing pipeline without external services
@@ -124,6 +141,26 @@ interface DomainAdapter {
 - Plan normalizer: fixes shorthand node types, adds `n8n-` prefix
 - Query expansions: email→gmail/smtp/imap, chat→slack/discord/telegram, schedule→cron/interval
 
+### WP-CLI (WordPress via Terminal)
+- 25 built-in operations (posts, taxonomy, users, plugins, themes, database, options, search-replace, cache, rewrite, WooCommerce)
+- Live discovery via `wp cli cmd-dump --format=json`
+- `operationId` format: `wp.<group>.<subcommand>` e.g. `wp.post.create`, `wp.plugin.install`
+- Executes wp commands via Shell Engine with RBAC policy enforcement
+- Admin commands (plugin install, db export, etc.) auto-elevate to admin role
+- `--porcelain` for create operations, `--format=json` for list/get
+- 3 plan normalizers: shorthand fix (spaces/hyphens→dots), param renaming (title→post_title, name→_positional)
+- Query expansions: post→article/blog/content, plugin→extension/addon, database→db/sql/mysql
+
+### Git (CLI)
+- 28 built-in operations across 9 categories (setup, staging, branch, remote, history, merge, stash, tag, undo)
+- `operationId` format: `git.<command>` or `git.<group>.<subcommand>` e.g. `git.commit`, `git.branch.create`
+- Executes git commands via Shell Engine with RBAC policy enforcement
+- Dev role blocks dangerous patterns (`git push --force`, `git reset --hard`)
+- Destructive ops (reset, rebase, clean, branch.delete) generate validation warnings
+- Command spec mapping: each operationId maps to typed param handlers (flag, short-flag, value, positional)
+- 3 plan normalizers: prefix fix, space-to-dot, param renaming (msg→message, branch→name, repo→url, file→files)
+- Query expansions: commit→save/snapshot, branch→fork/feature, merge→combine/integrate, push→upload/deploy
+
 ## Key pipeline (Autonomous Agent)
 1. RECALL — TF-IDF search finds relevant Knowledge + Skills + Memories
 2. PLAN — LLM generates ExecutionPlan JSON with CTT context (few-shot + anti-patterns)
@@ -139,7 +176,7 @@ interface DomainAdapter {
 - **Inline retry**: feed execution errors back to LLM for self-correction (2 attempts for 3B models)
 - **Secret sanitizer**: 4-layer credential protection before persisting
 
-## Eval results (cross-domain, 23 goals)
+## Eval results (cross-domain, 33 goals)
 ```
 Model                                 JSON%   Plan%   Comp%   Exec%   Steps   Latency
 -------------------------------------------------------------------------------------

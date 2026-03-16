@@ -37,7 +37,7 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 
 ## Eval results
 
-23 goals across 4 domains — **zero runtime dependencies**, just Node.js built-ins:
+33 goals across 6 domains — **zero runtime dependencies**, just Node.js built-ins:
 
 | Model | Size | JSON parse | Plan valid | Composed | Avg latency |
 |-------|------|-----------|-----------|----------|-------------|
@@ -141,6 +141,8 @@ interface DomainAdapter {
 | **browser** | 16 | 6 | Chrome automation via PinchTab/CDP |
 | **wordpress** | 20+ | 6 | REST API with live endpoint discovery from `/wp-json/` |
 | **n8n** | 17+ | 6 | Workflow composition + deploy via REST API |
+| **wp-cli** | 25+ | 5 | WordPress via WP-CLI terminal commands with Shell Engine |
+| **git** | 28 | 5 | Git version control via Shell Engine |
 
 **Echo** — CRUD items, links, notifications. For testing the full pipeline without external dependencies.
 
@@ -150,7 +152,21 @@ interface DomainAdapter {
 
 **n8n** — 17 built-in node types across 6 categories (triggers, HTTP, flow control, transforms, integrations, AI). Execution composes a complete n8n workflow JSON with BFS auto-layout and deploys it via the REST API — it doesn't execute steps sequentially.
 
+**wp-cli** — 25 built-in WP-CLI operations (posts, taxonomy, users, plugins, themes, database, options, search-replace, cache, rewrite, WooCommerce). Executes `wp` commands via the Shell Engine with RBAC policy enforcement — no API keys needed, uses local server auth. Live discovery via `wp cli cmd-dump`. Admin commands auto-elevate. Ideal for DevOps, CI/CD, and local development.
+
+**git** — 28 built-in operations across 9 categories (setup, staging, branch, remote, history, merge, stash, tag, undo). Executes `git` commands via the Shell Engine — the dev RBAC role blocks dangerous patterns like `git push --force` and `git reset --hard`. Command spec mapping converts typed params to proper flag styles (-m, --oneline, positional args). Plan normalizers fix LLM mistakes: bare operationIds, msg→message, branch→name, repo→url.
+
 ### Writing your own domain
+
+Any CLI tool can become a domain adapter. The pattern is always the same:
+
+1. **Define Knowledge** — describe what commands exist, with typed parameters
+2. **Build commands** — convert ExecutionStep params into shell command strings
+3. **Execute via Shell Engine** — RBAC policy, audit log, timeout, output limits for free
+4. **Parse output** — turn stdout into structured data for downstream steps
+5. **Add normalizers** — fix the mistakes LLMs make with your domain
+
+#### Minimal example (API-based domain)
 
 ```typescript
 import type { DomainAdapter } from 'ctt-shell';
@@ -160,7 +176,7 @@ export class MyAdapter implements DomainAdapter {
   readonly name = 'My Domain';
 
   async extractKnowledge() {
-    return [/* Knowledge entities describing your API operations */];
+    return [/* Knowledge entities describing your operations */];
   }
 
   async execute(plan) {
@@ -171,23 +187,282 @@ export class MyAdapter implements DomainAdapter {
     // Check operationIds exist, deps are valid
   }
 
-  // Optional: help TF-IDF find your operations
   queryExpansions() {
     return { 'user': ['account', 'member', 'person'] };
   }
 
-  // Optional: fix common LLM mistakes for your domain
   planNormalizers() {
     return [(plan, fixes) => { /* fix domain-specific issues */ }];
   }
 }
 ```
 
+#### Full example: Adding a CLI tool (e.g., `docker`, `kubectl`, `terraform`)
+
+This is how wp-cli and git adapters work. Use this as a template for any CLI tool.
+
+**Step 1 — Create the adapter file** (`domains/my-cli/adapter.ts`):
+
+```typescript
+import type { DomainAdapter, PlanNormalizer } from '../../src/domain/adapter.js';
+import type {
+  Knowledge, ExecutionPlan, ExecutionResult, ExecutionStep,
+  ValidationResult, StepResult,
+} from '../../src/types/entities.js';
+import { createExecutor } from '../../src/shell/executor.js';
+import { AuditLog } from '../../src/shell/audit.js';
+import type { ShellRole } from '../../src/shell/policy.js';
+import { join } from 'node:path';
+
+export class MyCliAdapter implements DomainAdapter {
+  readonly id = 'my-cli';          // Used in store paths and --domain flag
+  readonly name = 'My Tool (CLI)'; // Display name
+  private executor;
+
+  constructor(config?: { role?: ShellRole; cwd?: string }) {
+    const audit = new AuditLog(join(process.cwd(), '.ctt-shell', 'logs'));
+    this.executor = createExecutor(
+      config?.role ?? 'dev',
+      config?.cwd ?? process.cwd(),
+      audit,
+    );
+  }
+
+  // ── 1. Define what operations exist ──────────────────────────────────────
+
+  async extractKnowledge(): Promise<Knowledge[]> {
+    return MY_KNOWLEDGE;
+  }
+
+  // ── 2. Execute plans via Shell Engine ────────────────────────────────────
+
+  async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
+    const start = Date.now();
+    const outputs = new Map<string, unknown>();
+    const stepResults: StepResult[] = [];
+
+    for (const step of plan.steps) {
+      const stepStart = Date.now();
+      const cmd = this.buildCommand(step, outputs);
+      const result = this.executor.exec(cmd);
+
+      if (!result.executed || result.exitCode !== 0) {
+        stepResults.push({
+          stepId: step.stepId, operationId: step.operationId,
+          success: false,
+          error: result.denyReason || result.stderr || `Exit code: ${result.exitCode}`,
+          durationMs: Date.now() - stepStart,
+        });
+        continue;
+      }
+
+      const response = this.parseOutput(result.stdout, step);
+      if (step.outputRef) outputs.set(step.outputRef, response);
+
+      stepResults.push({
+        stepId: step.stepId, operationId: step.operationId,
+        success: true, response, durationMs: Date.now() - stepStart,
+      });
+    }
+
+    const success = stepResults.every(s => s.success);
+    return {
+      success, goal: plan.goal, domainId: this.id,
+      steps: stepResults, totalDurationMs: Date.now() - start,
+      error: success ? undefined : stepResults.find(s => !s.success)?.error,
+    };
+  }
+
+  // ── 3. Build shell commands from step params ─────────────────────────────
+
+  private buildCommand(step: ExecutionStep, outputs: Map<string, unknown>): string {
+    // Convert operationId to command: "mycli.resource.list" → "mycli resource list"
+    const subcommand = step.operationId.replace(/^mycli\./, '').replace(/\./g, ' ');
+    const parts = ['mycli', subcommand];
+
+    for (const [key, value] of Object.entries(step.params)) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === 'boolean' && value) {
+        parts.push(`--${key}`);
+      } else if (key === '_positional') {
+        parts.push(String(value));           // bare positional arg
+      } else {
+        parts.push(`--${key}=${String(value)}`);
+      }
+    }
+    return parts.join(' ');
+  }
+
+  // ── 4. Parse stdout into structured data ─────────────────────────────────
+
+  private parseOutput(stdout: string, step: ExecutionStep): unknown {
+    try { return JSON.parse(stdout.trim()); }
+    catch { return { output: stdout.trim() }; }
+  }
+
+  // ── 5. Validate plans before execution ───────────────────────────────────
+
+  validate(plan: ExecutionPlan): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const knownOps = new Set(MY_KNOWLEDGE.map(k => k.operationId));
+
+    for (const step of plan.steps) {
+      if (!step.operationId.startsWith('mycli.')) {
+        errors.push(`Step ${step.stepId}: must start with "mycli."`);
+      } else if (!knownOps.has(step.operationId)) {
+        warnings.push(`Step ${step.stepId}: unknown operation "${step.operationId}"`);
+      }
+      // Validate dependencies
+      if (step.dependsOn) {
+        const ids = new Set(plan.steps.map(s => s.stepId));
+        for (const dep of step.dependsOn) {
+          if (!ids.has(dep)) errors.push(`Step ${step.stepId} depends on non-existent ${dep}`);
+        }
+      }
+    }
+    return { valid: errors.length === 0, errors, warnings };
+  }
+
+  // ── 6. Help TF-IDF find your operations ──────────────────────────────────
+
+  queryExpansions(): Record<string, string[]> {
+    return {
+      'resource': ['item', 'object', 'entity'],
+      'list':     ['show', 'get', 'display'],
+      'create':   ['new', 'add', 'make'],
+      'delete':   ['remove', 'destroy', 'rm'],
+    };
+  }
+
+  // ── 7. Fix common LLM mistakes ──────────────────────────────────────────
+
+  planNormalizers(): PlanNormalizer[] {
+    return [
+      // Add prefix if missing: "resource list" → "mycli.resource.list"
+      (plan, fixes) => {
+        for (const step of plan.steps) {
+          if (!step.operationId.startsWith('mycli.')) {
+            step.operationId = `mycli.${step.operationId.replace(/\s+/g, '.')}`;
+            fixes.push('added mycli. prefix');
+          }
+        }
+      },
+      // Fix param names LLMs get wrong
+      (plan, fixes) => {
+        for (const step of plan.steps) {
+          if (step.params['name'] && !step.params['_positional']) {
+            step.params['_positional'] = step.params['name'];
+            delete step.params['name'];
+            fixes.push('moved name to positional arg');
+          }
+        }
+      },
+    ];
+  }
+}
+
+// ── Knowledge definitions ──────────────────────────────────────────────────
+
+const MY_KNOWLEDGE: Knowledge[] = [
+  {
+    id: 'mycli-resource-list', type: 'knowledge', domainId: 'my-cli',
+    createdAt: '', updatedAt: '', tags: ['my-cli', 'resource', 'list'],
+    operationId: 'mycli.resource.list',
+    displayName: 'mycli resource list',
+    description: 'List all resources',
+    category: 'resource',
+    parameters: [
+      { name: 'format', type: 'string', description: 'Output format (json, table)', required: false },
+    ],
+  },
+  // ... more Knowledge entities
+];
+
+// ── Eval goals ─────────────────────────────────────────────────────────────
+
+export const MYCLI_EVAL_GOALS = [
+  { goal: 'List all resources', domainId: 'my-cli', expectedOps: ['mycli.resource.list'], complexity: 'simple' as const },
+];
+```
+
+**Step 2 — Create barrel export** (`domains/my-cli/index.ts`):
+
+```typescript
+export { MyCliAdapter, MYCLI_EVAL_GOALS } from './adapter.js';
+```
+
+**Step 3 — Register in CLI** (`src/cli/cli.ts`):
+
+```typescript
+import { MyCliAdapter, MYCLI_EVAL_GOALS } from '../../domains/my-cli/index.js';
+
+// In createInfra():
+domains.register(new MyCliAdapter());
+
+// In goalsByDomain:
+'my-cli': MYCLI_EVAL_GOALS,
+```
+
+**Step 4 — Register in MCP server** (`src/mcp/server.ts`):
+
+```typescript
+import { MyCliAdapter } from '../../domains/my-cli/index.js';
+
+// In createInfra():
+domains.register(new MyCliAdapter());
+```
+
+**Step 5 — Add binary to Shell Engine policy** (`src/shell/policy.ts`):
+
+If your CLI binary isn't already in the dev role's `allowedCommands`, add it:
+
+```typescript
+// In the dev policy's allowedCommands array:
+'mycli',
+```
+
+Currently allowed: `ls cat head tail wc find grep which echo pwd whoami date env printenv git node npm npx tsc tsx mkdir touch cp mv curl wget tar unzip gzip diff sort uniq cut tr sed awk jq wp`
+
+**Step 6 — Write tests, compile, verify**:
+
+```bash
+npm run build && npm test
+```
+
+#### Design decisions for CLI adapters
+
+| Decision | Recommendation | Example |
+|----------|---------------|---------|
+| **operationId format** | `<tool>.<resource>.<action>` | `docker.container.run`, `kubectl.pod.list` |
+| **Positional args** | Use `_positional` param key | `{ _positional: "nginx:latest" }` |
+| **Output parsing** | Try JSON first, fall back to text | `--format=json`, `--output=json`, `-o json` |
+| **Destructive commands** | Warn in validate(), let RBAC enforce | `docker.system.prune`, `kubectl.delete` |
+| **Live discovery** | Parse `<tool> help` or similar | `docker info --format json`, `kubectl api-resources` |
+| **Admin elevation** | Create one-off admin executor | See wp-cli adapter's ADMIN_COMMANDS pattern |
+
+#### Checklist for new CLI adapters
+
+- [ ] `domains/<tool>/adapter.ts` — Adapter class implementing DomainAdapter
+- [ ] `domains/<tool>/index.ts` — Barrel exports
+- [ ] Knowledge entities — At least 10-15 operations with typed parameters
+- [ ] `buildCommand()` — Convert operationId + params to proper CLI syntax
+- [ ] `parseOutput()` — Parse stdout into structured data (JSON preferred)
+- [ ] `validate()` — Check operationId prefix, known ops, dependency refs
+- [ ] `queryExpansions()` — 5-10 synonym mappings for TF-IDF search
+- [ ] `planNormalizers()` — At least: prefix fix, param renaming
+- [ ] Eval goals — 3-5 goals (simple, medium, complex)
+- [ ] Register in `src/cli/cli.ts` (import, register, eval goals)
+- [ ] Register in `src/mcp/server.ts` (import, register)
+- [ ] Add binary to `src/shell/policy.ts` dev role if not already there
+- [ ] Unit tests in `tests/unit/domain-adapters.test.ts`
+- [ ] `npm run build && npm test`
+
 ## CLI commands
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 117 unit tests
+npm test                                         # Run 149 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -242,8 +517,10 @@ domains/
   browser/        → Chrome CDP via PinchTab (16 ops, 6 goals)
   wordpress/      → WordPress REST API (20+ endpoints, 6 goals)
   n8n/            → n8n workflow automation (17+ node types, 6 goals)
+  wp-cli/         → WordPress via WP-CLI terminal (25+ ops, 5 goals)
+  git/            → Git version control (28 ops, 5 goals)
 tests/
-  unit/           → 117 unit tests (store, search, normalizers, adapters, MCP, shell)
+  unit/           → 149 unit tests (store, search, normalizers, adapters, MCP, shell)
 ```
 
 ## MCP server
@@ -288,12 +565,12 @@ This lets Claude (or any MCP client) search operations, compose plans, execute w
 npm run build && npm test
 ```
 
-117 tests covering:
+149 tests covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Response normalizer** (12) — JSON extraction, truncation recovery, thinking tags
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
-- **Domain adapters** (35) — all 4 adapters: knowledge, validation, execution, normalizers
+- **Domain adapters** (67) — all 6 adapters: knowledge, validation, execution, normalizers
 - **MCP server** (11) — protocol handshake, tool listing, all 7 tools, error handling
 - **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
 
@@ -308,7 +585,7 @@ CTT approach: give a small model the right context at inference time:
 3. **Memory entities** warn about past failures ("don't use PATCH, use POST for WordPress")
 4. **Guard rails** catch and fix the remaining mistakes automatically
 
-The result: a 3B model with CTT context achieves 96% composition rate across 23 multi-domain goals. The same model without CTT context produces unparseable JSON most of the time.
+The result: a 3B model with CTT context achieves 96% composition rate across 33 multi-domain goals. The same model without CTT context produces unparseable JSON most of the time.
 
 ## License
 

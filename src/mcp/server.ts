@@ -32,6 +32,8 @@ import { EchoAdapter } from '../../domains/echo/adapter.js';
 import { BrowserAdapter } from '../../domains/browser/index.js';
 import { WordPressAdapter } from '../../domains/wordpress/index.js';
 import { N8nAdapter } from '../../domains/n8n/index.js';
+import { WpCliAdapter } from '../../domains/wp-cli/index.js';
+import { GitAdapter } from '../../domains/git/index.js';
 
 // ─── JSON-RPC 2.0 Types ─────────────────────────────────────────────────────
 
@@ -166,6 +168,8 @@ function createInfra() {
   domains.register(new BrowserAdapter());
   domains.register(new WordPressAdapter());
   domains.register(new N8nAdapter());
+  domains.register(new WpCliAdapter());
+  domains.register(new GitAdapter());
   domains.rebuildIndex();
 
   return { store, search, domains };
