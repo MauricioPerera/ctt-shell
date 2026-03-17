@@ -75,7 +75,7 @@ function expandQuery(tokens: string[]): string[] {
   for (const token of tokens) {
     const synonyms = expansions[token];
     if (synonyms) {
-      for (const s of synonyms) expanded.add(stem(s));
+      for (const s of synonyms) expanded.add(s);
     }
   }
   return [...expanded];
@@ -101,19 +101,23 @@ export class SearchEngine {
   private df: Map<string, number> = new Map();
   private totalDocs = 0;
 
-  /** Replace all query expansions */
+  /** Replace all query expansions (pre-stems values) */
   setExpansions(newExpansions: Record<string, string[]>): void {
-    expansions = { ...newExpansions };
+    expansions = {};
+    for (const [key, values] of Object.entries(newExpansions)) {
+      expansions[key] = values.map(v => stem(v.toLowerCase()));
+    }
   }
 
-  /** Merge additional expansions into the existing set */
+  /** Merge additional expansions into the existing set (pre-stems values) */
   addExpansions(extra: Record<string, string[]>): void {
     for (const [key, values] of Object.entries(extra)) {
+      const stemmed = values.map(v => stem(v.toLowerCase()));
       if (expansions[key]) {
-        const merged = new Set([...expansions[key], ...values]);
+        const merged = new Set([...expansions[key], ...stemmed]);
         expansions[key] = [...merged];
       } else {
-        expansions[key] = [...values];
+        expansions[key] = [...stemmed];
       }
     }
   }
@@ -149,6 +153,34 @@ export class SearchEngine {
     }
   }
 
+  /** Incrementally add entities to the index without full rebuild */
+  addToIndex(entities: Entity[]): void {
+    for (const entity of entities) {
+      if (this.docs.some(d => d.id === entity.id)) continue;
+
+      const text = this.entityToText(entity);
+      const tokens = tokenize(text);
+      const tf = new Map<string, number>();
+
+      for (const token of tokens) {
+        tf.set(token, (tf.get(token) ?? 0) + 1);
+      }
+
+      const maxTf = Math.max(...tf.values(), 1);
+      for (const [term, count] of tf) {
+        tf.set(term, count / maxTf);
+      }
+
+      const uniqueTerms = new Set(tokens);
+      for (const term of uniqueTerms) {
+        this.df.set(term, (this.df.get(term) ?? 0) + 1);
+      }
+
+      this.docs.push({ id: entity.id, entity, tokens, tf });
+      this.totalDocs++;
+    }
+  }
+
   /** Search for entities matching a query */
   search(query: string, limit = 20): SearchResult[] {
     const queryTokens = tokenize(query);
@@ -170,12 +202,12 @@ export class SearchEngine {
         matched.push(term);
       }
 
-      // Boost: tag overlap
+      // Boost: tag overlap (Set for O(1) lookup)
       const entity = doc.entity;
       if ('tags' in entity && Array.isArray(entity.tags)) {
-        const tagTokens = entity.tags.map(t => stem(t.toLowerCase()));
+        const tagSet = new Set(entity.tags.map(t => stem(t.toLowerCase())));
         for (const term of expanded) {
-          if (tagTokens.includes(term)) score *= 1.3;
+          if (tagSet.has(term)) score *= 1.3;
         }
       }
 

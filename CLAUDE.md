@@ -23,13 +23,13 @@ Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audi
 src/
   types/          → Entity types (Knowledge, Skill, Memory, Profile) + ExecutionPlan
   storage/        → Content-addressable filesystem store (SHA-256 dedup)
-  search/         → TF-IDF search with Porter stemming + injectable domain expansions
+  search/         → TF-IDF search with Porter stemming, incremental indexing, injectable domain expansions
   guardrails/     → Response normalizer, plan normalizer, circuit breaker, sanitizer
   domain/         → DomainAdapter interface + DomainRegistry
   agent/          → Autonomous pipeline (recall→plan→normalize→validate→execute→learn)
-               + recall (TF-IDF context builder) + learn (skill lifecycle)
-  llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
-  eval/           → Model evaluation framework + inline retry for small models
+               + recall (TF-IDF context builder) + learn (skill lifecycle) + enrich (memory enrichment)
+  llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI, llama.cpp/llamafile)
+  eval/           → Model evaluation framework + inline retry + benchmarks + persistent reports
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
   mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
@@ -48,12 +48,15 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 167 unit tests
+npm test                                         # Run 222 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
 node dist/src/cli/cli.js eval --domain browser   # Evaluate single domain
 node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
+node dist/src/cli/cli.js eval --exec             # Enable execution testing (Exec% > 0)
+node dist/src/cli/cli.js eval --verbose          # Per-goal detailed output
+node dist/src/cli/cli.js eval --baseline <path>  # Compare vs saved baseline report
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js status                  # Store stats
 node dist/src/cli/cli.js domain list             # List registered domains
@@ -64,6 +67,7 @@ node dist/src/cli/cli.js context remove <id>     # Remove a context entry
 node dist/src/cli/cli.js context clear           # Remove all context entries
 node dist/src/cli/cli.js context load-dir [dir]  # Load all files from directory
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
+node dist/src/cli/cli.js benchmark               # Run performance benchmarks
 ```
 
 ## Environment variables
@@ -78,9 +82,10 @@ node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 - `N8N_BASE_URL` — n8n instance URL (for n8n domain)
 - `N8N_API_KEY` — n8n API key (for n8n domain)
 - `PINCHTAB_URL` — PinchTab server URL (for browser domain, default: http://127.0.0.1:9867)
+- `LLAMACPP_PORT` — llama.cpp/llamafile server port (default: 8080)
 
 ## Config file
-`.ctt-shell/config.json` — alternative to env vars. Supports: llmProvider, cfApiKey, cfAccountId, cfModel, cfGateway, ollamaModel
+`.ctt-shell/config.json` — alternative to env vars. Supports: llmProvider, cfApiKey, cfAccountId, cfModel, cfGateway, ollamaModel, llamacppModel, llamacppBaseUrl
 
 ## Entity types (CTT mapping)
 | Entity | CTT Role | Description |
@@ -174,26 +179,101 @@ See README.md for full template with code examples.
 3. NORMALIZE — Response normalizer (JSON extraction) + Plan normalizer (structural fixes)
 4. VALIDATE — DomainAdapter.validate()
 5. EXECUTE — DomainAdapter.execute()
-6. LEARN — Success→save Skill (experimental). Failure→save Memory + update Circuit Breaker
+6. LEARN — Success→save Skill (experimental) + incremental index. Failure→save Memory + update Circuit Breaker + incremental index
+7. ENRICH (optional) — If `enrichLlm` configured, small local LLM classifies error memories (category, tags, severity, fix suggestion) via 3-4 parallel single-task prompts
+
+### Search indexing strategy
+- **Full rebuild** (`search.index()`): used once at cold startup
+- **Incremental** (`search.addToIndex()`): used after knowledge extraction, learning, context loading. ~115x faster than full rebuild.
+- **Query expansions**: domain synonyms are pre-stemmed at registration time (not per-search)
 
 ## Guard rails (proven in n8n-a2e + wp-a2e)
-- **Response normalizer**: strip thinking tags, extract JSON from code fences (including unclosed), fix trailing commas, auto-close truncated JSON to last complete object
-- **Plan normalizer**: fix out-of-bounds connections, self-loops, orphans, type coercion, circular dep breaking
-- **Circuit breaker**: block operations after N consecutive failures, inject anti-patterns into LLM context
+- **Response normalizer**: strip thinking tags, extract JSON from code fences (including unclosed), fix trailing commas, auto-close truncated JSON to last complete object. Uses array-based string building and incremental bracket counting for performance.
+- **Plan normalizer**: fix out-of-bounds connections, self-loops, orphans, type coercion. Single-pass DFS cycle detection with 3-state coloring (O(n) vs previous O(n²)). Uses Map for O(1) step lookups.
+- **Circuit breaker**: block operations after N consecutive failures (default threshold: 3), inject anti-patterns into LLM context. Tracks error reasons and resolutions per target. Lazy-loads from stored Memory entities.
 - **Inline retry**: feed execution errors back to LLM for self-correction (2 attempts for 3B models)
-- **Secret sanitizer**: 4-layer credential protection before persisting
+- **Secret sanitizer**: 4-layer credential protection before persisting (known secrets map, URL auth params, JSON credential fields, known prefixes like sk-, ghp_, Bearer, JWT)
 
-## Eval results (cross-domain, 33 goals)
+## Memory Enrichment (src/agent/enrich.ts)
+Optional post-processing that uses a small local LLM to classify and tag error memories.
+
+### How it works
+- After `learnFromError()` saves a raw Memory, the enrichment pipeline runs 3-4 **parallel** single-task prompts
+- Each prompt is ultra-short (~50 tokens) designed for sub-1B models
+- **classify**: error→category (auth, timeout, validation, not_found, etc.)
+- **tags**: extract 3-5 keyword tags for better TF-IDF recall
+- **severity**: blocking, recoverable, or warning
+- **suggestFix** (optional): one-line fix suggestion
+
+### Configuration
+Set `enrichLlm` in `AutonomousAgentConfig` to enable. Uses a separate LLM instance (can be different model/provider than the plan LLM).
+```typescript
+const agent = new AutonomousAgent({
+  store, search, domains,
+  llm: mainLlm,            // for plan generation
+  enrichLlm: localLlm,     // for memory enrichment (optional)
+});
+```
+
+### Model recommendations
+- **gemma3:270m** (Ollama): best quality/speed ratio for enrichment (~5s per memory, follows format)
+- **SmolLM2-135M**: too small, does not follow instructions reliably (IFEval 38%)
+
+## LLM Providers (src/llm/provider.ts)
+5 providers: Claude, OpenAI, Ollama, Cloudflare Workers AI, llama.cpp/llamafile.
+
+### llama.cpp / llamafile provider
+For running models locally via llama-server or llamafile with OpenAI-compatible API.
+```bash
+# Start llamafile server
+llamafile.exe --server -m model.gguf --nobrowser --port 8080 -ngl 999
+# Use in eval
+LLAMACPP_PORT=8080 node dist/src/cli/cli.js eval --exec --models "llamacpp:model-name"
+```
+Short alias in --models: `lc:model-name` expands to `llamacpp:model-name`.
+
+## Eval Framework (src/eval/)
+Measures LLM plan generation quality across domains with persistent reporting and regression tracking.
+
+### Metrics
+- **JSON%** — valid JSON extracted from LLM response
+- **Plan%** — valid ExecutionPlan structure (goal + steps array)
+- **Comp%** — all steps have operationId and params (composition quality)
+- **Exec%** — execution/validation passed (requires `--exec` flag)
+- **Steps** — average step count per goal
+- **Latency** — average time per goal (LLM + normalization)
+
+### Features
+- **Persistent reports**: auto-saved to `.ctt-shell/eval/` as timestamped JSON
+- **Regression tracking**: `--baseline <path>` compares vs saved report, flags >5pp drops
+- **Execution testing**: `--exec` runs echo domain plans through full execution, validates others
+- **Verbose output**: `--verbose` shows per-goal raw response, fixes applied, errors
+- **Inline retry**: small models (1B/3B) get 2 attempts with error feedback
+
+### Report storage
+`.ctt-shell/eval/` — JSON files named `{timestamp}.json`, loadable as baselines
+
+### Eval results (cross-domain, 33 goals, --exec)
 ```
 Model                                 JSON%   Plan%   Comp%   Exec%   Steps   Latency
 -------------------------------------------------------------------------------------
-@cf/meta/llama-3.2-1b-instruct         100%    100%    100%      0%     2.5    1242ms
-@cf/meta/llama-3.2-3b-instruct          96%     96%     96%      0%     2.0    1545ms
-@cf/ibm-granite/granite-4.0-h-micro      91%     91%     91%      0%     2.0    6451ms
-@cf/zai-org/glm-4.7-flash               94%     94%     94%      0%     1.9   11763ms
-@cf/google/gemma-3-12b-it              100%    100%    100%      0%     2.2    4156ms
+@cf/qwen/qwen3-30b-a3b-fp8             100%    100%    100%    100%     2.1    3188ms
+@cf/meta/llama-3.1-8b-instruct-fast     97%     97%     97%     97%     2.0    2000ms
+@cf/meta/llama-3.2-1b-instruct         100%    100%    100%    100%     2.5    2269ms
+@cf/meta/llama-3.2-3b-instruct          94%     94%     94%     94%     2.1    1626ms
+@cf/google/gemma-3-12b-it               97%     97%     97%     97%     2.0    6680ms
+@cf/ibm-granite/granite-4.0-h-micro      91%     91%     91%     91%     2.0    6974ms
+@cf/zai-org/glm-4.7-flash               97%     97%     97%     97%     2.0    9119ms
+ollama:gemma3:270m (local)               91%     88%     88%     88%     1.8   78158ms
+llamafile:gemma3:270m (local)            91%     85%     85%     85%     1.9   89083ms
 ```
-The 1B Llama model achieves 100% composition across all 33 goals — fastest and most accurate. CTT context compensates for parameter count.
+Qwen3 30B A3B (MoE, 3B active params) and Llama 3.2 1B achieve 100% across all metrics. The 1B Llama remains fastest (1626-2269ms range). CTT context compensates for parameter count — even 1B models match 30B. Gemma3 270M running 100% locally via Ollama/llamafile achieves 85-88% execution with only 268M parameters (Q8_0) — the smallest model tested, proving CTT works even at sub-1B scale without any cloud API dependency.
+
+## Benchmark Harness (src/eval/benchmark.ts)
+Performance measurement for core operations. Run with `ctt-shell benchmark`.
+
+Benchmarks: search.index, search.addToIndex, search.search, normalizeResponse, normalizePlan, store.list.
+Output: min/avg/p95/max latency per operation.
 
 ## Shell Engine (src/shell/)
 Controlled command execution for LLM agents with RBAC, audit, and sandboxing.
@@ -276,6 +356,23 @@ Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/
 
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
+
+## Test suite (232 tests, 25 suites)
+```
+tests/unit/
+  domain-adapters.test.ts    → 64 tests: knowledge extraction, validation, normalization for all 6 domains
+  shell.test.ts              → 34 tests: parser, executor, RBAC policy, audit log
+  context-loader.test.ts     → 18 tests: addText, loadFile, markdown splitting, directory loading
+  normalize-response.test.ts → 15 tests: JSON extraction, thinking tags, trailing commas, auto-close
+  normalize-plan.test.ts     → 11 tests: step IDs, dependencies, cycles, orphans
+  mcp-server.test.ts         → 11 tests: MCP tool handling
+  store.test.ts              →  8 tests: content-addressable store CRUD
+  tfidf.test.ts              →  6 tests: indexing, search, query expansion
+  sanitize.test.ts           → 22 tests: 4-layer sanitization, round-trip, nested objects
+  agent.test.ts              → 21 tests: recall, contextToPrompt, learnSkill, learnFromError, learnFix
+  circuit-breaker.test.ts    → 12 tests: threshold, reset, antipatterns, lazy load, extractHost
+  enrich.test.ts             → 10 tests: enrichMemory, applyEnrichment, enrichMemories batch, LLM error handling
+```
 
 ## Zero runtime dependencies
 Only Node.js built-ins: crypto, fs, path, http, child_process, readline. TypeScript for compilation only.

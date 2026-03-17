@@ -50,8 +50,8 @@ export class DomainRegistry {
     const knowledge = await adapter.extractKnowledge();
     const saved = this.store.saveBatch(knowledge);
 
-    // Rebuild search index with all entities
-    this.rebuildIndex();
+    // Incrementally add new entities instead of full rebuild
+    this.search.addToIndex(saved);
 
     return saved.length;
   }

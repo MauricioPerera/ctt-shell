@@ -199,9 +199,47 @@ export class CloudflareAiProvider implements LlmProvider {
   }
 }
 
+// ─── llama.cpp / llamafile (OpenAI-compatible local server) ─────────────────
+
+export class LlamaCppProvider implements LlmProvider {
+  name = 'llamacpp';
+  private model: string;
+  private baseUrl: string;
+
+  constructor(config?: { model?: string; baseUrl?: string }) {
+    this.model = config?.model ?? 'local';
+    this.baseUrl = config?.baseUrl ?? `http://localhost:${process.env.LLAMACPP_PORT || '8080'}`;
+  }
+
+  async chat(messages: LlmMessage[], options?: LlmOptions): Promise<LlmResponse> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      max_tokens: options?.maxTokens ?? 4096,
+    };
+    if (options?.temperature !== undefined) body.temperature = options.temperature;
+    if (options?.stop) body.stop = options.stop;
+
+    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) throw new Error(`llama.cpp API error (${res.status}): ${await res.text()}`);
+
+    const data = await res.json() as any;
+    return {
+      content: data.choices[0].message.content,
+      usage: { inputTokens: data.usage?.prompt_tokens ?? 0, outputTokens: data.usage?.completion_tokens ?? 0 },
+      model: data.model ?? this.model,
+    };
+  }
+}
+
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
-export type ProviderType = 'claude' | 'openai' | 'ollama' | 'cloudflare';
+export type ProviderType = 'claude' | 'openai' | 'ollama' | 'cloudflare' | 'llamacpp';
 
 export function createProvider(type: ProviderType, config?: Record<string, unknown>): LlmProvider {
   switch (type) {
@@ -211,6 +249,8 @@ export function createProvider(type: ProviderType, config?: Record<string, unkno
       return new OpenAiProvider({ apiKey: (config?.apiKey as string) || process.env.OPENAI_API_KEY || '', model: config?.model as string });
     case 'ollama':
       return new OllamaProvider({ model: config?.model as string, baseUrl: config?.baseUrl as string });
+    case 'llamacpp':
+      return new LlamaCppProvider({ model: config?.model as string, baseUrl: config?.baseUrl as string });
     case 'cloudflare':
       return new CloudflareAiProvider({
         apiKey: (config?.apiKey as string) || process.env.CF_API_KEY || '',

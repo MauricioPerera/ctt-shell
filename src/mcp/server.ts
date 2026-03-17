@@ -390,14 +390,14 @@ const handlers: Record<string, ToolHandler> = {
         const category = args.category as string | undefined;
         const tags = (args.tags as string[]) || [];
         const entry = loader.addText(text, tags, category, title);
-        loader.rebuildIndex();
+        loader.addToSearchIndex([entry]);
         return { id: entry.id, title: entry.displayName, message: 'Context entry added' };
       }
       case 'add_file': {
         const file = args.file as string;
         if (!file) return { error: 'Missing "file" parameter' };
         const entries = loader.loadFile(file);
-        loader.rebuildIndex();
+        loader.addToSearchIndex(entries);
         return { count: entries.length, entries: entries.map(e => ({ id: e.id, title: e.displayName })) };
       }
       case 'list': {
@@ -428,7 +428,7 @@ const handlers: Record<string, ToolHandler> = {
       case 'load_dir': {
         const dir = (args.directory as string) || join(CTT_ROOT, 'context');
         const entries = loader.loadDirectory(dir);
-        loader.rebuildIndex();
+        loader.addToSearchIndex(entries);
         return { count: entries.length, directory: dir, entries: entries.map(e => ({ id: e.id, title: e.displayName })) };
       }
       default:

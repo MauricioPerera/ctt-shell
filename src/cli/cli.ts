@@ -71,6 +71,7 @@ function getLlmProvider(): { provider: ProviderType; config: Record<string, unkn
   if (process.env.OPENAI_API_KEY) return { provider: 'openai', config: { apiKey: process.env.OPENAI_API_KEY } };
   if (cfKey && cfAccount) return { provider: 'cloudflare', config: { apiKey: cfKey, accountId: cfAccount, model: cfModel, gateway: cfGateway } };
   if (cfg.llmProvider === 'cloudflare' && cfKey) return { provider: 'cloudflare', config: { apiKey: cfKey, accountId: cfAccount, model: cfModel, gateway: cfGateway } };
+  if (process.env.LLAMACPP_PORT || cfg.llmProvider === 'llamacpp') return { provider: 'llamacpp', config: { model: cfg.llamacppModel, baseUrl: cfg.llamacppBaseUrl } };
   return { provider: 'ollama', config: { model: process.env.OLLAMA_MODEL || cfg.ollamaModel || 'qwen2.5:3b' } };
 }
 
@@ -167,7 +168,7 @@ Environment:
         ? modelsStr.split(',').map(m => {
             const [prov, ...modelParts] = m.split(':');
             const model = modelParts.join(':');
-            const provType = (prov === 'cf' ? 'cloudflare' : prov) as ProviderType;
+            const provType = (prov === 'cf' ? 'cloudflare' : prov === 'lc' ? 'llamacpp' : prov) as ProviderType;
             // Merge config file credentials for cloudflare
             const extra: Record<string, unknown> = { model };
             if (provType === 'cloudflare') {
@@ -204,6 +205,19 @@ Environment:
         evalGoals = Object.values(goalsByDomain).flat();
       }
 
+      // Parse extra flags
+      const execFlag = args.includes('--exec');
+      const verboseFlag = args.includes('--verbose');
+      const baselineFlag = args.indexOf('--baseline');
+      const baselinePath = baselineFlag >= 0 ? args[baselineFlag + 1] : undefined;
+
+      // Build domain adapter map for execution testing
+      const adapterMap = new Map<string, import('../domain/adapter.js').DomainAdapter>();
+      for (const did of domains.list()) {
+        const adapter = domains.get(did);
+        if (adapter) adapterMap.set(did, adapter);
+      }
+
       // Generate context for goals
       const circuitBreaker = new CircuitBreaker(store);
       const evaluator = new ModelEvaluator({
@@ -211,9 +225,11 @@ Environment:
           const ctx = recall(goal, search, circuitBreaker, { compact });
           return contextToPrompt(ctx, compact);
         },
+        domainAdapters: execFlag ? adapterMap : undefined,
+        executeAfterPlan: execFlag,
       });
 
-      console.log(`Running eval: ${evalGoals.length} goals x ${modelConfigs.length} models`);
+      console.log(`Running eval: ${evalGoals.length} goals x ${modelConfigs.length} models${execFlag ? ' [+exec]' : ''}`);
       console.log('');
 
       const report = await evaluator.runAll(
@@ -223,6 +239,28 @@ Environment:
       );
 
       ModelEvaluator.printReport(report);
+
+      // Verbose per-goal details
+      if (verboseFlag) {
+        ModelEvaluator.printDetailedReport(report);
+      }
+
+      // Save report
+      const evalDir = join(CTT_ROOT, 'eval');
+      const savedFile = ModelEvaluator.saveReport(report, evalDir);
+      console.log(`Report saved: ${join(evalDir, savedFile)}`);
+
+      // Baseline comparison
+      if (baselinePath) {
+        try {
+          const baseline = ModelEvaluator.loadReport(baselinePath);
+          const comparison = ModelEvaluator.compareReports(report, baseline);
+          ModelEvaluator.printComparison(comparison);
+        } catch (e) {
+          console.error(`Failed to load baseline: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+
       break;
     }
 
@@ -278,14 +316,14 @@ Environment:
           const text = args[textFlag + 1];
           if (!text) { console.error('Usage: ctt-shell context add --text "your text"'); process.exit(1); }
           const entry = contextLoader.addText(text, tags, category);
-          contextLoader.rebuildIndex();
+          contextLoader.addToSearchIndex([entry]);
           console.log(`Added context: "${entry.displayName}" (${entry.id})`);
         } else {
           // File: context add <filepath> [--category docs] [--tags a,b]
           const filePath = args[2];
           if (!filePath || filePath.startsWith('--')) { console.error('Usage: ctt-shell context add <file> or context add --text "..."'); process.exit(1); }
           const entries = contextLoader.loadFile(filePath);
-          contextLoader.rebuildIndex();
+          contextLoader.addToSearchIndex(entries);
           console.log(`Loaded ${entries.length} context entries from "${filePath}"`);
           for (const e of entries) {
             console.log(`  ${e.id}: ${e.displayName}`);
@@ -321,7 +359,7 @@ Environment:
       } else if (sub === 'load-dir') {
         const dir = args[2] || join(CTT_ROOT, 'context');
         const entries = contextLoader.loadDirectory(dir);
-        contextLoader.rebuildIndex();
+        contextLoader.addToSearchIndex(entries);
         console.log(`Loaded ${entries.length} context entries from "${dir}"`);
         for (const e of entries) {
           console.log(`  ${e.id}: ${e.displayName}`);
@@ -334,6 +372,13 @@ Environment:
 
     case 'mcp': {
       await startMcpServer();
+      break;
+    }
+
+    case 'benchmark': {
+      const { runBenchmarks, printBenchmarks } = await import('../eval/benchmark.js');
+      const benchResults = runBenchmarks();
+      printBenchmarks(benchResults);
       break;
     }
 

@@ -144,7 +144,7 @@ export function normalizeResponse(raw: string): NormalizeResult {
  */
 function fixQuotes(str: string): string {
   // Simple state machine: track if we're inside a double-quoted string
-  let result = '';
+  const chars: string[] = [];
   let inDoubleQuote = false;
   let inSingleQuote = false;
 
@@ -154,17 +154,17 @@ function fixQuotes(str: string): string {
 
     if (ch === '"' && prev !== '\\' && !inSingleQuote) {
       inDoubleQuote = !inDoubleQuote;
-      result += ch;
+      chars.push(ch);
     } else if (ch === "'" && prev !== '\\' && !inDoubleQuote) {
       // Replace single quote with double quote
       inSingleQuote = !inSingleQuote;
-      result += '"';
+      chars.push('"');
     } else {
-      result += ch;
+      chars.push(ch);
     }
   }
 
-  return result;
+  return chars.join('');
 }
 
 /**
@@ -208,24 +208,29 @@ function autoCloseJson(str: string): string | null {
       if (stepBoundary > 0) lastCompleteObj = stepBoundary + 1; // Position after the }
     }
     if (lastCompleteObj > 0) {
+      // Count brackets in the removed portion and subtract
+      const removed = result.slice(lastCompleteObj + 1);
       result = result.slice(0, lastCompleteObj + 1);
+      let removedBraces = 0, removedBrackets = 0;
+      let removedInString = false;
+      for (let i = 0; i < removed.length; i++) {
+        const ch = removed[i];
+        const prev = i > 0 ? removed[i - 1] : '';
+        if (ch === '"' && prev !== '\\') removedInString = !removedInString;
+        else if (!removedInString) {
+          if (ch === '{') removedBraces++;
+          else if (ch === '}') removedBraces--;
+          else if (ch === '[') removedBrackets++;
+          else if (ch === ']') removedBrackets--;
+        }
+      }
+      braces -= removedBraces;
+      brackets -= removedBrackets;
+      inString = false; // truncated to a complete object boundary
     } else {
       result += '"';
+      inString = false;
     }
-    // Recount after truncation
-    braces = 0; brackets = 0; inString = false;
-    for (let i = 0; i < result.length; i++) {
-      const ch = result[i];
-      const prev = i > 0 ? result[i - 1] : '';
-      if (ch === '"' && prev !== '\\') inString = !inString;
-      else if (!inString) {
-        if (ch === '{') braces++;
-        else if (ch === '}') braces--;
-        else if (ch === '[') brackets++;
-        else if (ch === ']') brackets--;
-      }
-    }
-    if (inString) result += '"';
   }
 
   // Remove trailing comma before closing

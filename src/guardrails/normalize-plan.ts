@@ -144,35 +144,29 @@ export function normalizePlan(plan: ExecutionPlan): NormalizePlanResult {
     }
   }
 
-  // Fix 3: Break circular dependencies
-  const visited = new Set<number>();
-  const path = new Set<number>();
+  // Fix 3: Break circular dependencies (single-pass DFS with 3 states)
+  const state = new Map<number, 'visiting' | 'done'>();
+  const stepMap = new Map(steps.map(s => [s.stepId, s]));
 
-  function hasCycle(id: number): boolean {
-    if (path.has(id)) return true;
-    if (visited.has(id)) return false;
-    path.add(id);
-    const step = steps.find(s => s.stepId === id);
+  function visit(id: number): void {
+    if (state.get(id) === 'done') return;
+    if (state.get(id) === 'visiting') return;
+    state.set(id, 'visiting');
+    const step = stepMap.get(id);
     if (step?.dependsOn) {
-      for (const dep of step.dependsOn) {
-        if (hasCycle(dep)) {
-          // Break the cycle by removing this edge
-          step.dependsOn = step.dependsOn!.filter(d => d !== dep);
+      step.dependsOn = step.dependsOn.filter(dep => {
+        if (state.get(dep) === 'visiting') {
           fixes.push(`broke circular dependency: step ${id} → ${dep}`);
           return false;
         }
-      }
+        visit(dep);
+        return true;
+      });
     }
-    path.delete(id);
-    visited.add(id);
-    return false;
+    state.set(id, 'done');
   }
 
-  for (const step of steps) {
-    visited.clear();
-    path.clear();
-    hasCycle(step.stepId);
-  }
+  for (const step of steps) visit(step.stepId);
 
   // Fix 4: Auto-chain orphan steps (steps with no dependsOn and not step 1)
   for (let i = 1; i < steps.length; i++) {

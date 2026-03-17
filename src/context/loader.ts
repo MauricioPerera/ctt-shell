@@ -151,6 +151,11 @@ export class ContextLoader {
     this.search.index(allEntities);
   }
 
+  /** Incrementally add entities to search index */
+  addToSearchIndex(entities: Knowledge[]): void {
+    this.search.addToIndex(entities);
+  }
+
   // ─── Parsers ───────────────────────────────────────────────────────────────
 
   /** Parse markdown into sections by ## headers */

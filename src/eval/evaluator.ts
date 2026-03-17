@@ -2,8 +2,11 @@
  * Model Evaluator — runs goals against LLM providers and measures metrics.
  */
 
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { LlmProvider, LlmMessage } from '../llm/provider.js';
 import type { ExecutionPlan } from '../types/entities.js';
+import type { DomainAdapter } from '../domain/adapter.js';
 import { normalizeResponse } from '../guardrails/normalize-response.js';
 import { normalizePlan } from '../guardrails/normalize-plan.js';
 
@@ -52,16 +55,37 @@ export interface EvalReport {
   }[];
 }
 
+export interface ComparisonDelta {
+  model: string;
+  jsonRate: number;
+  planRate: number;
+  compositionRate: number;
+  executionRate: number;
+  latencyDelta: number;
+  regressions: string[];
+}
+
+export interface ComparisonResult {
+  deltas: ComparisonDelta[];
+  hasRegressions: boolean;
+}
+
 export class ModelEvaluator {
   private systemPrompt: string;
   private contextGenerator?: (goal: string, compact: boolean) => string;
+  private domainAdapters?: Map<string, DomainAdapter>;
+  private executeAfterPlan: boolean;
 
   constructor(opts?: {
     systemPrompt?: string;
     contextGenerator?: (goal: string, compact: boolean) => string;
+    domainAdapters?: Map<string, DomainAdapter>;
+    executeAfterPlan?: boolean;
   }) {
     this.systemPrompt = opts?.systemPrompt || DEFAULT_EVAL_SYSTEM_PROMPT;
     this.contextGenerator = opts?.contextGenerator;
+    this.domainAdapters = opts?.domainAdapters;
+    this.executeAfterPlan = opts?.executeAfterPlan ?? false;
   }
 
   async runOne(
@@ -138,6 +162,37 @@ export class ModelEvaluator {
         // Basic validation: all steps have operationId and params
         const valid = normalizedPlan.steps.every(s => s.operationId && s.params);
         result.compositionPassed = valid && normalizedPlan.steps.length > 0;
+
+        // Execution testing (if enabled and composition passed)
+        if (result.compositionPassed && this.executeAfterPlan && this.domainAdapters) {
+          const adapter = this.domainAdapters.get(goal.domainId);
+          if (adapter) {
+            try {
+              // Apply domain-specific normalizers
+              const domainNormalizers = adapter.planNormalizers?.();
+              if (domainNormalizers) {
+                for (const normalizer of domainNormalizers) {
+                  normalizer(normalizedPlan, fixes);
+                }
+              }
+              const validation = adapter.validate(normalizedPlan);
+              if (validation.valid) {
+                // Only execute echo domain (no side effects); validate-only for others
+                if (goal.domainId === 'echo') {
+                  const execResult = await adapter.execute(normalizedPlan);
+                  result.executionPassed = execResult.success;
+                  if (!execResult.success) result.executionError = execResult.error;
+                } else {
+                  result.executionPassed = true; // validation passed = exec passed for non-echo
+                }
+              } else {
+                result.executionError = validation.errors.join('; ');
+              }
+            } catch (e) {
+              result.executionError = e instanceof Error ? e.message : String(e);
+            }
+          }
+        }
         break;
 
       } catch {
@@ -206,6 +261,117 @@ export class ModelEvaluator {
         + `${s.avgSteps}`.padStart(8)
         + `${s.avgLatencyMs}ms`.padStart(10);
       console.log(row);
+    }
+    console.log('');
+  }
+
+  /** Print detailed per-goal results */
+  static printDetailedReport(report: EvalReport): void {
+    console.log('\n' + '='.repeat(80));
+    console.log('Detailed Results');
+    console.log('='.repeat(80));
+
+    for (const r of report.results) {
+      const status = r.compositionPassed ? '[+]' : '[-]';
+      console.log(`\n${status} ${r.goal}`);
+      console.log(`  Model: ${r.model} | Steps: ${r.stepCount} | Latency: ${r.latencyMs}ms`);
+      console.log(`  JSON: ${r.jsonValid ? 'OK' : 'FAIL'} | Plan: ${r.planValid ? 'OK' : 'FAIL'} | Comp: ${r.compositionPassed ? 'OK' : 'FAIL'} | Exec: ${r.executionPassed ? 'OK' : 'FAIL'}`);
+      if (r.normalizeFixes.length > 0) {
+        console.log(`  Fixes: ${r.normalizeFixes.join(', ')}`);
+      }
+      if (r.executionError) {
+        console.log(`  Exec Error: ${r.executionError}`);
+      }
+      if (r.rawResponse && !r.jsonValid) {
+        console.log(`  Raw: ${r.rawResponse.slice(0, 200)}${r.rawResponse.length > 200 ? '...' : ''}`);
+      }
+    }
+    console.log('');
+  }
+
+  /** Save report to disk */
+  static saveReport(report: EvalReport, dir: string): string {
+    const ts = report.timestamp.replace(/[:.]/g, '-');
+    const filename = `${ts}.json`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, filename), JSON.stringify(report, null, 2));
+    return filename;
+  }
+
+  /** Load a saved report */
+  static loadReport(path: string): EvalReport {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  }
+
+  /** Compare current report against a baseline */
+  static compareReports(current: EvalReport, baseline: EvalReport): ComparisonResult {
+    const deltas: ComparisonDelta[] = [];
+    let hasRegressions = false;
+
+    for (const cs of current.summary) {
+      const bs = baseline.summary.find(b => b.model === cs.model);
+      if (!bs) continue;
+
+      const regressions: string[] = [];
+      const jsonDelta = cs.jsonRate - bs.jsonRate;
+      const planDelta = cs.planRate - bs.planRate;
+      const compDelta = cs.compositionRate - bs.compositionRate;
+      const execDelta = cs.executionRate - bs.executionRate;
+      const latDelta = cs.avgLatencyMs - bs.avgLatencyMs;
+
+      if (jsonDelta < -0.05) regressions.push(`JSON% dropped ${Math.round(jsonDelta * 100)}pp`);
+      if (planDelta < -0.05) regressions.push(`Plan% dropped ${Math.round(planDelta * 100)}pp`);
+      if (compDelta < -0.05) regressions.push(`Comp% dropped ${Math.round(compDelta * 100)}pp`);
+      if (execDelta < -0.05) regressions.push(`Exec% dropped ${Math.round(execDelta * 100)}pp`);
+
+      if (regressions.length > 0) hasRegressions = true;
+
+      deltas.push({
+        model: cs.model,
+        jsonRate: jsonDelta,
+        planRate: planDelta,
+        compositionRate: compDelta,
+        executionRate: execDelta,
+        latencyDelta: latDelta,
+        regressions,
+      });
+    }
+
+    return { deltas, hasRegressions };
+  }
+
+  /** Print comparison table */
+  static printComparison(comparison: ComparisonResult): void {
+    console.log('\n' + '='.repeat(80));
+    console.log('Regression Comparison (vs baseline)');
+    console.log('='.repeat(80));
+
+    const header = 'Model'.padEnd(35) + 'JSON%'.padStart(8) + 'Plan%'.padStart(8) + 'Comp%'.padStart(8) + 'Exec%'.padStart(8) + 'Latency'.padStart(10);
+    console.log(header);
+    console.log('-'.repeat(77));
+
+    for (const d of comparison.deltas) {
+      const fmt = (v: number) => {
+        const sign = v >= 0 ? '+' : '';
+        return `${sign}${Math.round(v * 100)}pp`;
+      };
+      const row = d.model.slice(0, 34).padEnd(35)
+        + fmt(d.jsonRate).padStart(8)
+        + fmt(d.planRate).padStart(8)
+        + fmt(d.compositionRate).padStart(8)
+        + fmt(d.executionRate).padStart(8)
+        + `${d.latencyDelta >= 0 ? '+' : ''}${d.latencyDelta}ms`.padStart(10);
+      console.log(row);
+      if (d.regressions.length > 0) {
+        console.log(`  !! ${d.regressions.join(' | ')}`);
+      }
+    }
+
+    console.log('');
+    if (comparison.hasRegressions) {
+      console.log('!! REGRESSIONS DETECTED');
+    } else {
+      console.log('No regressions detected.');
     }
     console.log('');
   }

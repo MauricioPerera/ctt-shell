@@ -13,12 +13,14 @@ import { normalizeResponse } from '../guardrails/normalize-response.js';
 import { normalizePlan } from '../guardrails/normalize-plan.js';
 import { recall, contextToPrompt } from './recall.js';
 import { learnSkill, learnFromError } from './learn.js';
+import { enrichMemory, applyEnrichment } from './enrich.js';
 
 export interface AutonomousAgentConfig {
   store: Store;
   search: SearchEngine;
   domains: DomainRegistry;
   llm: LlmProvider;
+  enrichLlm?: LlmProvider;   // optional small local LLM for memory enrichment
   maxRetries?: number;       // default 2
   temperature?: number;      // default 0.1
   compact?: boolean;         // auto-detect from model name
@@ -71,6 +73,7 @@ export class AutonomousAgent {
   private search: SearchEngine;
   private domains: DomainRegistry;
   private llm: LlmProvider;
+  private enrichLlm?: LlmProvider;
   private circuitBreaker: CircuitBreaker;
   private maxRetries: number;
   private temperature: number;
@@ -81,6 +84,7 @@ export class AutonomousAgent {
     this.search = config.search;
     this.domains = config.domains;
     this.llm = config.llm;
+    this.enrichLlm = config.enrichLlm;
     this.circuitBreaker = new CircuitBreaker(config.store);
     this.maxRetries = config.maxRetries ?? 2;
     this.temperature = config.temperature ?? 0.1;
@@ -207,18 +211,27 @@ export class AutonomousAgent {
         for (const step of result.steps) {
           if (step.success) this.circuitBreaker.recordSuccess(step.operationId);
         }
+        // Incrementally add new skill to search index
+        this.search.addToIndex([skill]);
       } else {
         const memory = learnFromError(this.store, this.circuitBreaker, normalizedPlan, result, effectiveDomain);
         emit('learn', `Saved error memory: ${memory.content.slice(0, 80)}`);
-      }
 
-      // Rebuild search index with new entities
-      const allEntities = [
-        ...this.store.list('knowledge'),
-        ...this.store.list('skill'),
-        ...this.store.list('memory'),
-      ];
-      this.search.index(allEntities);
+        // Enrich memory with small local LLM (if configured)
+        if (this.enrichLlm) {
+          try {
+            const enrichment = await enrichMemory(this.enrichLlm, memory, { suggestFixes: true });
+            applyEnrichment(memory, enrichment);
+            this.store.save(memory); // re-save with enriched tags
+            emit('learn', `Enriched memory: +${enrichment.tags.length} tags, severity=${enrichment.severity} (${enrichment.enrichDurationMs}ms)`);
+          } catch {
+            // Enrichment is best-effort, don't fail the pipeline
+          }
+        }
+
+        // Incrementally add new memory to search index
+        this.search.addToIndex([memory]);
+      }
 
       return { success: result.success, plan: normalizedPlan, result, events, retries };
     } catch (e) {
