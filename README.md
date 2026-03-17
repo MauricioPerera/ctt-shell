@@ -37,7 +37,7 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 
 ## Eval results
 
-33 goals across 6 domains — **zero runtime dependencies**, just Node.js built-ins:
+38 goals across 7 domains — **zero runtime dependencies**, just Node.js built-ins:
 
 | Model | Size | JSON% | Plan% | Comp% | Exec% | Steps | Latency |
 |-------|------|-------|-------|-------|-------|-------|---------|
@@ -50,7 +50,7 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 | GLM 4.7 Flash (Cloudflare) | ~2B | 97% | 97% | 97% | 97% | 2.0 | 9.1s |
 | Gemma3 270M (Ollama, local) | **268M** | 91% | 88% | 88% | 88% | 1.8 | 78.2s |
 
-A **1B Llama 3.2** and a **3B-active Qwen3 MoE** both achieve **100%** across all 33 multi-step goals — faster and more accurate than models 4-12x their size. Even a **268M parameter Gemma3** running fully local via Ollama hits 88%. CTT structured context at inference time compensates for parameter count.
+A **1B Llama 3.2** and a **3B-active Qwen3 MoE** both achieve **100%** across all 38 multi-step goals — faster and more accurate than models 4-12x their size. Even a **268M parameter Gemma3** running fully local via Ollama hits 88%. CTT structured context at inference time compensates for parameter count.
 
 ### Hybrid search impact (embeddings)
 
@@ -443,7 +443,7 @@ If your CLI binary isn't already in the dev role's `allowedCommands`, add it:
 'mycli',
 ```
 
-Currently allowed: `ls cat head tail wc find grep which echo pwd whoami date env printenv git node npm npx tsc tsx mkdir touch cp mv curl wget tar unzip gzip diff sort uniq cut tr sed awk jq wp`
+Currently allowed: `ls cat head tail wc find grep which echo pwd whoami date env printenv git node npm npx tsc tsx mkdir touch cp mv curl wget tar unzip gzip diff sort uniq cut tr sed awk jq wp himalaya`
 
 **Step 6 — Write tests, compile, verify**:
 
@@ -483,12 +483,12 @@ npm run build && npm test
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 222 unit tests
+npm test                                         # Run 263 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous: recall → plan → execute → learn
-node dist/src/cli/cli.js eval                    # Evaluate all 33 goals across all domains
+node dist/src/cli/cli.js eval                    # Evaluate all 38 goals across all domains
 node dist/src/cli/cli.js eval --domain wordpress # Evaluate single domain
 node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
 node dist/src/cli/cli.js eval --exec             # Enable execution testing (Exec% > 0)
@@ -559,8 +559,9 @@ domains/
   n8n/            → n8n workflow automation (17+ node types, 6 goals)
   wp-cli/         → WordPress via WP-CLI terminal (25+ ops, 5 goals)
   git/            → Git version control (28 ops, 5 goals)
+  email/          → Email IMAP/SMTP via Himalaya (15 ops, 5 goals)
 tests/
-  unit/           → 222 unit tests, 24 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer)
+  unit/           → 263 unit tests, 31 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer)
 ```
 
 ## MCP server
@@ -598,7 +599,7 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 6 domains.
+This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 7 domains.
 
 ## Context loader (business knowledge)
 
@@ -648,7 +649,7 @@ npm run build && npm test
 - **Embeddings** (10) — RRF fusion, weights, deduplication, empty inputs
 - **Response normalizer** (15) — JSON extraction, truncation recovery, thinking tags, trailing commas
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
-- **Domain adapters** (64) — all 6 adapters: knowledge, validation, execution, normalizers
+- **Domain adapters** (85) — all 7 adapters: knowledge, validation, execution, normalizers
 - **MCP server** (11) — protocol handshake, tool listing, all 8 tools, error handling
 - **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
 - **Context loader** (18) — addText, loadFile (markdown/json/txt), loadDirectory, list/remove/clear
@@ -667,7 +668,7 @@ CTT approach: give a small model the right context at inference time:
 3. **Memory entities** warn about past failures ("don't use PATCH, use POST for WordPress")
 4. **Guard rails** catch and fix the remaining mistakes automatically
 
-The result: a **1B model** with CTT context achieves **100% composition and execution rate** across 33 multi-domain goals — outperforming models 3-12x its size. Even a **268M model** running fully local hits 88%. Add optional semantic embeddings and a 91% model jumps to 97%. The same models without CTT context produce unparseable JSON most of the time.
+The result: a **1B model** with CTT context achieves **100% composition and execution rate** across 38 multi-domain goals — outperforming models 3-12x its size. Even a **268M model** running fully local hits 88%. Add optional semantic embeddings and a 91% model jumps to 97%. The same models without CTT context produce unparseable JSON most of the time.
 
 ## License
 
