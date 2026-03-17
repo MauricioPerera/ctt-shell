@@ -41,6 +41,7 @@ domains/
   n8n/            → n8n workflow automation (17 built-in + live extraction, 6 eval goals)
   wp-cli/         → WordPress via WP-CLI terminal commands (25 built-in + live discovery, 5 eval goals)
   git/            → Git via terminal commands (28 built-in operations, 5 eval goals)
+  email/          → Email via Himalaya CLI (15 built-in operations, 5 eval goals)
 tests/            → Unit tests
 contracts/        → Specification contracts
 ```
@@ -48,7 +49,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 222 unit tests
+npm test                                         # Run 263 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -177,6 +178,18 @@ See README.md for full template with code examples.
 - 3 plan normalizers: prefix fix, space-to-dot, param renaming (msg→message, branch→name, repo→url, file→files)
 - Query expansions: commit→save/snapshot, branch→fork/feature, merge→combine/integrate, push→upload/deploy
 
+### Email (Himalaya CLI)
+- 15 built-in operations across 5 categories (folder, envelope, message, flag, attachment)
+- `operationId` format: `email.<resource>.<action>` e.g. `email.message.read`, `email.envelope.search`
+- Executes himalaya commands via Shell Engine with RBAC policy enforcement
+- Requires Himalaya CLI installed and configured (~/.config/himalaya/config.toml)
+- Supports IMAP (read/search/manage) and SMTP (send) with OAuth2 and App Passwords
+- JSON output via `--output json` for structured parsing
+- Destructive ops (message.delete, folder.delete) generate validation warnings
+- Required param validation for send (to) and read (id)
+- 3 plan normalizers: shorthand expansion (read→email.message.read), space-to-dot, param renaming (recipient→to, message_id→id, destination→target)
+- Query expansions: email→mail/correo/message, send→enviar/compose, folder→carpeta/label, flag→marcar/star
+
 ## Key pipeline (Autonomous Agent)
 1. RECALL — Hybrid search (TF-IDF + embeddings via RRF) finds relevant Knowledge + Skills + Memories
 2. PLAN — LLM generates ExecutionPlan JSON with CTT context (few-shot + anti-patterns)
@@ -267,7 +280,7 @@ Measures LLM plan generation quality across domains with persistent reporting an
 ### Report storage
 `.ctt-shell/eval/` — JSON files named `{timestamp}.json`, loadable as baselines
 
-### Eval results (cross-domain, 33 goals, --exec)
+### Eval results (cross-domain, 38 goals, --exec)
 ```
 Model                                 JSON%   Plan%   Comp%   Exec%   Steps   Latency
 -------------------------------------------------------------------------------------
@@ -381,10 +394,10 @@ Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
 
-## Test suite (242 tests, 27 suites)
+## Test suite (263 tests, 31 suites)
 ```
 tests/unit/
-  domain-adapters.test.ts    → 64 tests: knowledge extraction, validation, normalization for all 6 domains
+  domain-adapters.test.ts    → 85 tests: knowledge extraction, validation, normalization for all 7 domains
   shell.test.ts              → 34 tests: parser, executor, RBAC policy, audit log
   context-loader.test.ts     → 18 tests: addText, loadFile, markdown splitting, directory loading
   normalize-response.test.ts → 15 tests: JSON extraction, thinking tags, trailing commas, auto-close

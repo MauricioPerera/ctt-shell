@@ -161,6 +161,7 @@ interface DomainAdapter {
 | **n8n** | 17+ | 6 | Workflow composition + deploy via REST API |
 | **wp-cli** | 25+ | 5 | WordPress via WP-CLI terminal commands with Shell Engine |
 | **git** | 28 | 5 | Git version control via Shell Engine |
+| **email** | 15 | 5 | Email (IMAP/SMTP) via Himalaya CLI |
 
 **Echo** — CRUD items, links, notifications. For testing the full pipeline without external dependencies.
 
@@ -173,6 +174,8 @@ interface DomainAdapter {
 **wp-cli** — 25 built-in WP-CLI operations (posts, taxonomy, users, plugins, themes, database, options, search-replace, cache, rewrite, WooCommerce). Executes `wp` commands via the Shell Engine with RBAC policy enforcement — no API keys needed, uses local server auth. Live discovery via `wp cli cmd-dump`. Admin commands auto-elevate. Ideal for DevOps, CI/CD, and local development.
 
 **git** — 28 built-in operations across 9 categories (setup, staging, branch, remote, history, merge, stash, tag, undo). Executes `git` commands via the Shell Engine — the dev RBAC role blocks dangerous patterns like `git push --force` and `git reset --hard`. Command spec mapping converts typed params to proper flag styles (-m, --oneline, positional args). Plan normalizers fix LLM mistakes: bare operationIds, msg→message, branch→name, repo→url.
+
+**email** — 15 built-in operations across 5 categories (folder, envelope, message, flag, attachment). Uses Himalaya CLI for IMAP/SMTP — a single Rust binary with `--output json` for structured parsing. Supports reading, searching, sending, replying, forwarding, moving, flagging, and downloading attachments. Works with Gmail, Outlook, and any IMAP/SMTP provider via OAuth2 or App Passwords. Plan normalizers expand shorthands (read→email.message.read), fix param naming (recipient→to, message_id→id, destination→target). Multilingual query expansions include Spanish (correo, enviar, buscar, carpeta).
 
 ### Writing your own domain
 
@@ -639,7 +642,7 @@ Basic plan $29/month, Premium $99/month...
 npm run build && npm test
 ```
 
-222 tests across 24 suites covering:
+263 tests across 31 suites covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Embeddings** (10) — RRF fusion, weights, deduplication, empty inputs

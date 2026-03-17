@@ -19,6 +19,7 @@ import { WordPressAdapter, WP_EVAL_GOALS } from '../../domains/wordpress/index.j
 import { N8nAdapter, N8N_EVAL_GOALS } from '../../domains/n8n/index.js';
 import { WpCliAdapter, WPCLI_EVAL_GOALS } from '../../domains/wp-cli/index.js';
 import { GitAdapter, GIT_EVAL_GOALS } from '../../domains/git/index.js';
+import { EmailAdapter, EMAIL_EVAL_GOALS } from '../../domains/email/index.js';
 import { contextToPrompt, recall } from '../agent/recall.js';
 import { CircuitBreaker } from '../guardrails/circuit-breaker.js';
 import { startMcpServer } from '../mcp/server.js';
@@ -52,6 +53,7 @@ function createInfra() {
   domains.register(new N8nAdapter());
   domains.register(new WpCliAdapter());
   domains.register(new GitAdapter());
+  domains.register(new EmailAdapter());
 
   // Load and index existing entities
   domains.rebuildIndex();
@@ -193,6 +195,7 @@ Environment:
         n8n: N8N_EVAL_GOALS,
         'wp-cli': WPCLI_EVAL_GOALS,
         'git': GIT_EVAL_GOALS,
+        'email': EMAIL_EVAL_GOALS,
       };
 
       let evalGoals: typeof ECHO_EVAL_GOALS;

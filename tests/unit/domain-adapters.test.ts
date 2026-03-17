@@ -12,6 +12,7 @@ import { WordPressAdapter } from '../../domains/wordpress/adapter.js';
 import { N8nAdapter } from '../../domains/n8n/adapter.js';
 import { WpCliAdapter } from '../../domains/wp-cli/adapter.js';
 import { GitAdapter } from '../../domains/git/adapter.js';
+import { EmailAdapter } from '../../domains/email/adapter.js';
 import type { ExecutionPlan } from '../../src/types/entities.js';
 
 describe('EchoAdapter', () => {
@@ -649,5 +650,229 @@ describe('GitAdapter', () => {
     normalizers[2](plan, fixes);
     assert.equal(plan.steps[0].params.files, 'index.ts');
     assert.equal(plan.steps[0].params.file, undefined);
+  });
+});
+
+// ─── Email Adapter ────────────────────────────────────────────────────────────
+
+describe('EmailAdapter', () => {
+  const adapter = new EmailAdapter({ cwd: process.cwd() });
+
+  it('has correct id and name', () => {
+    assert.equal(adapter.id, 'email');
+    assert.equal(adapter.name, 'Email (Himalaya CLI)');
+  });
+
+  it('extracts 15 built-in Knowledge entities', async () => {
+    const knowledge = await adapter.extractKnowledge();
+    assert.ok(knowledge.length >= 15, `Expected ≥15 Knowledge, got ${knowledge.length}`);
+    assert.ok(knowledge.every(k => k.type === 'knowledge'));
+    assert.ok(knowledge.every(k => k.domainId === 'email'));
+    assert.ok(knowledge.every(k => k.operationId.startsWith('email.')));
+  });
+
+  it('Knowledge entities have required fields', async () => {
+    const knowledge = await adapter.extractKnowledge();
+    for (const k of knowledge) {
+      assert.ok(k.id, 'Missing id');
+      assert.ok(k.operationId, 'Missing operationId');
+      assert.ok(k.displayName, 'Missing displayName');
+      assert.ok(k.description, 'Missing description');
+      assert.ok(k.category, 'Missing category');
+      assert.ok(Array.isArray(k.tags), 'Tags should be array');
+    }
+  });
+
+  it('Knowledge covers key categories', async () => {
+    const knowledge = await adapter.extractKnowledge();
+    const categories = new Set(knowledge.map(k => k.category));
+    assert.ok(categories.has('folder'), 'Missing folder category');
+    assert.ok(categories.has('envelope'), 'Missing envelope category');
+    assert.ok(categories.has('message'), 'Missing message category');
+    assert.ok(categories.has('flag'), 'Missing flag category');
+    assert.ok(categories.has('attachment'), 'Missing attachment category');
+  });
+
+  it('validates a correct plan', () => {
+    const plan: ExecutionPlan = {
+      goal: 'List folders',
+      steps: [
+        { stepId: 1, description: 'List folders', operationId: 'email.folder.list', params: {} },
+      ],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, true);
+    assert.equal(result.errors.length, 0);
+  });
+
+  it('rejects operationIds without email. prefix', () => {
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'message.read', params: {} }],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('must start with "email."')));
+  });
+
+  it('warns on unknown operations', () => {
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.nonexistent', params: {} }],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some(w => w.includes('unknown operation')));
+  });
+
+  it('warns on destructive operations', () => {
+    const plan: ExecutionPlan = {
+      goal: 'Delete email',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.delete', params: { id: '42' } }],
+    };
+    const result = adapter.validate(plan);
+    assert.ok(result.warnings.some(w => w.includes('destructive')));
+  });
+
+  it('validates required params for send', () => {
+    const plan: ExecutionPlan = {
+      goal: 'Send email',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.send', params: { subject: 'Hi' } }],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('requires "to"')));
+  });
+
+  it('validates required params for read', () => {
+    const plan: ExecutionPlan = {
+      goal: 'Read email',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.read', params: {} }],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('requires "id"')));
+  });
+
+  it('reports invalid dependency references', () => {
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.folder.list', params: {}, dependsOn: [99] }],
+    };
+    const result = adapter.validate(plan);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('non-existent step')));
+  });
+
+  it('provides query expansions', () => {
+    const expansions = adapter.queryExpansions();
+    assert.ok('email' in expansions);
+    assert.ok('send' in expansions);
+    assert.ok('read' in expansions);
+    assert.ok('folder' in expansions);
+    assert.ok('flag' in expansions);
+    assert.ok(expansions.email.includes('mail'));
+    assert.ok(expansions.email.includes('correo'));
+  });
+
+  it('provides plan normalizers', () => {
+    const normalizers = adapter.planNormalizers();
+    assert.ok(normalizers.length >= 3, `Expected ≥3 normalizers, got ${normalizers.length}`);
+  });
+
+  it('normalizer: adds email. prefix to bare operationIds', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'message.read', params: {} }],
+    };
+    const fixes: string[] = [];
+    normalizers[0](plan, fixes);
+    assert.ok(plan.steps[0].operationId.startsWith('email.'), `Expected email. prefix, got "${plan.steps[0].operationId}"`);
+  });
+
+  it('normalizer: expands shorthand "read" to full operationId', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'read', params: {} }],
+    };
+    const fixes: string[] = [];
+    normalizers[0](plan, fixes);
+    assert.equal(plan.steps[0].operationId, 'email.message.read');
+  });
+
+  it('normalizer: expands shorthand "send" to full operationId', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'send', params: {} }],
+    };
+    const fixes: string[] = [];
+    normalizers[0](plan, fixes);
+    assert.equal(plan.steps[0].operationId, 'email.message.send');
+  });
+
+  it('normalizer: fixes spaces in operationIds', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message read', params: {} }],
+    };
+    const fixes: string[] = [];
+    normalizers[1](plan, fixes);
+    assert.equal(plan.steps[0].operationId, 'email.message.read');
+  });
+
+  it('normalizer: renames recipient→to for send', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.send', params: { recipient: 'test@x.com', title: 'Hello', content: 'World' } }],
+    };
+    const fixes: string[] = [];
+    normalizers[2](plan, fixes);
+    assert.equal(plan.steps[0].params.to, 'test@x.com');
+    assert.equal(plan.steps[0].params.subject, 'Hello');
+    assert.equal(plan.steps[0].params.body, 'World');
+    assert.equal(plan.steps[0].params.recipient, undefined);
+    assert.equal(plan.steps[0].params.title, undefined);
+    assert.equal(plan.steps[0].params.content, undefined);
+  });
+
+  it('normalizer: renames message_id→id for read', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.read', params: { message_id: '42' } }],
+    };
+    const fixes: string[] = [];
+    normalizers[2](plan, fixes);
+    assert.equal(plan.steps[0].params.id, '42');
+    assert.equal(plan.steps[0].params.message_id, undefined);
+  });
+
+  it('normalizer: renames destination→target for move', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.message.move', params: { id: '42', destination: 'Archive' } }],
+    };
+    const fixes: string[] = [];
+    normalizers[2](plan, fixes);
+    assert.equal(plan.steps[0].params.target, 'Archive');
+    assert.equal(plan.steps[0].params.destination, undefined);
+  });
+
+  it('normalizer: renames flag→flags for flag ops', () => {
+    const normalizers = adapter.planNormalizers();
+    const plan: ExecutionPlan = {
+      goal: 'test',
+      steps: [{ stepId: 1, description: '', operationId: 'email.flag.add', params: { id: '42', flag: 'Seen' } }],
+    };
+    const fixes: string[] = [];
+    normalizers[2](plan, fixes);
+    assert.equal(plan.steps[0].params.flags, 'Seen');
+    assert.equal(plan.steps[0].params.flag, undefined);
   });
 });

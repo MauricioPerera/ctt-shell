@@ -34,6 +34,7 @@ import { WordPressAdapter } from '../../domains/wordpress/index.js';
 import { N8nAdapter } from '../../domains/n8n/index.js';
 import { WpCliAdapter } from '../../domains/wp-cli/index.js';
 import { GitAdapter } from '../../domains/git/index.js';
+import { EmailAdapter } from '../../domains/email/index.js';
 import { ContextLoader } from '../context/loader.js';
 
 // ─── JSON-RPC 2.0 Types ─────────────────────────────────────────────────────
@@ -189,6 +190,7 @@ function createInfra() {
   domains.register(new N8nAdapter());
   domains.register(new WpCliAdapter());
   domains.register(new GitAdapter());
+  domains.register(new EmailAdapter());
   domains.rebuildIndex();
 
   // Auto-load user context from .ctt-shell/context/ if it exists
