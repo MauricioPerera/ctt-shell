@@ -32,7 +32,8 @@ src/
   eval/           → Model evaluation framework + inline retry + benchmarks + persistent reports
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
-  mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
+  scheduler/      → Cron parser + task scheduler (daemon mode)
+  mcp/            → MCP server (9 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain adapter (7 operations, 5 eval goals)
@@ -49,7 +50,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 263 unit tests
+npm test                                         # Run 303 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -67,6 +68,10 @@ node dist/src/cli/cli.js context list            # List loaded context entries
 node dist/src/cli/cli.js context remove <id>     # Remove a context entry
 node dist/src/cli/cli.js context clear           # Remove all context entries
 node dist/src/cli/cli.js context load-dir [dir]  # Load all files from directory
+node dist/src/cli/cli.js schedule add "0 9 * * *" "check unread emails"  # Schedule task
+node dist/src/cli/cli.js schedule list           # List scheduled tasks
+node dist/src/cli/cli.js schedule remove <id>    # Remove a scheduled task
+node dist/src/cli/cli.js daemon                  # Start scheduler daemon (long-running)
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 node dist/src/cli/cli.js benchmark               # Run performance benchmarks
 ```
@@ -341,6 +346,7 @@ Exposes CTT pipeline + shell as MCP tools over stdio (JSON-RPC 2.0, protocol ver
 - **ctt_recall** — Build CTT context for a goal without executing (goal, compact?)
 - **ctt_shell** — Execute shell commands with RBAC policy (command, role?, cwd?, validate_only?)
 - **ctt_context** — Manage user-provided business context (add_text, add_file, list, remove, clear, load_dir)
+- **ctt_schedule** — Manage scheduled tasks with cron expressions (add, list, remove, enable, disable)
 
 ### Usage with Claude Desktop / claude_desktop_config.json
 ```json
@@ -394,7 +400,7 @@ Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
 
-## Test suite (263 tests, 31 suites)
+## Test suite (303 tests, 37 suites)
 ```
 tests/unit/
   domain-adapters.test.ts    → 85 tests: knowledge extraction, validation, normalization for all 7 domains
@@ -410,6 +416,7 @@ tests/unit/
   circuit-breaker.test.ts    → 12 tests: threshold, reset, antipatterns, lazy load, extractHost
   enrich.test.ts             → 10 tests: enrichMemory, applyEnrichment, enrichMemories batch, LLM error handling
   embedding.test.ts          → 10 tests: hybridSearch RRF, weight params, deduplication, edge cases
+  scheduler.test.ts          → 40 tests: cron parser, cronMatches, validation, nextRun, task CRUD, daemon tick, persistence
 ```
 
 ## Zero runtime dependencies

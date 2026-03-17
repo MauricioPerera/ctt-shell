@@ -36,6 +36,8 @@ import { WpCliAdapter } from '../../domains/wp-cli/index.js';
 import { GitAdapter } from '../../domains/git/index.js';
 import { EmailAdapter } from '../../domains/email/index.js';
 import { ContextLoader } from '../context/loader.js';
+import { Scheduler } from '../scheduler/scheduler.js';
+import { describeCron } from '../scheduler/cron-parser.js';
 
 // ─── JSON-RPC 2.0 Types ─────────────────────────────────────────────────────
 
@@ -161,6 +163,21 @@ const TOOLS = [
       required: ['action'],
     },
   },
+  {
+    name: 'ctt_schedule',
+    description: 'Manage scheduled tasks that run the autonomous pipeline on a cron schedule. Create recurring tasks like "check emails every morning" or "daily git status report".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', description: 'Action to perform', enum: ['add', 'list', 'remove', 'enable', 'disable'] },
+        cron: { type: 'string', description: 'Cron expression (for add): "0 9 * * *" = daily at 9am, "*/30 * * * *" = every 30min, "@daily", "@hourly"' },
+        goal: { type: 'string', description: 'Natural language goal to execute (for add)' },
+        domain: { type: 'string', description: 'Target domain ID (optional, for add)' },
+        id: { type: 'string', description: 'Task ID (for remove/enable/disable)' },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 // ─── Infrastructure Setup ────────────────────────────────────────────────────
@@ -199,7 +216,9 @@ function createInfra() {
   contextLoader.loadDirectory(contextDir);
   contextLoader.rebuildIndex();
 
-  return { store, search, domains, contextLoader };
+  const scheduler = new Scheduler(CTT_ROOT);
+
+  return { store, search, domains, contextLoader, scheduler };
 }
 
 function getLlmProvider(): { provider: ProviderType; config: Record<string, unknown> } | null {
@@ -437,6 +456,70 @@ const handlers: Record<string, ToolHandler> = {
       }
       default:
         return { error: `Unknown action: ${action}. Use: add_text, add_file, list, remove, clear, load_dir` };
+    }
+  },
+
+  async ctt_schedule(args, infra) {
+    const action = args.action as string;
+    const sched = infra.scheduler;
+
+    switch (action) {
+      case 'add': {
+        const cron = args.cron as string;
+        const goal = args.goal as string;
+        if (!cron || !goal) return { error: 'Missing "cron" and "goal" parameters' };
+        const domain = args.domain as string | undefined;
+        try {
+          const task = sched.add(cron, goal, domain);
+          return {
+            id: task.id,
+            cron: task.cron,
+            description: describeCron(task.cron),
+            goal: task.goal,
+            domain: task.domainId,
+            nextRunAt: task.nextRunAt,
+            message: 'Task scheduled. Start daemon with "ctt-shell daemon" to execute.',
+          };
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      case 'list': {
+        const tasks = sched.list();
+        return {
+          count: tasks.length,
+          tasks: tasks.map(t => ({
+            id: t.id,
+            cron: t.cron,
+            description: describeCron(t.cron),
+            goal: t.goal,
+            domain: t.domainId,
+            enabled: t.enabled,
+            lastRunAt: t.lastRunAt,
+            lastResult: t.lastResult,
+            nextRunAt: t.nextRunAt,
+            runCount: t.runCount,
+            failCount: t.failCount,
+          })),
+        };
+      }
+      case 'remove': {
+        const id = args.id as string;
+        if (!id) return { error: 'Missing "id" parameter' };
+        return { removed: sched.remove(id), id };
+      }
+      case 'enable': {
+        const id = args.id as string;
+        if (!id) return { error: 'Missing "id" parameter' };
+        return { enabled: sched.setEnabled(id, true), id };
+      }
+      case 'disable': {
+        const id = args.id as string;
+        if (!id) return { error: 'Missing "id" parameter' };
+        return { disabled: sched.setEnabled(id, false), id };
+      }
+      default:
+        return { error: `Unknown action: ${action}. Use: add, list, remove, enable, disable` };
     }
   },
 };

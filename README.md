@@ -483,7 +483,7 @@ npm run build && npm test
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 263 unit tests
+npm test                                         # Run 303 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -503,6 +503,14 @@ node dist/src/cli/cli.js context list            # List loaded context entries
 node dist/src/cli/cli.js context clear           # Remove all context entries
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 node dist/src/cli/cli.js benchmark               # Run performance benchmarks
+
+# Scheduler commands
+node dist/src/cli/cli.js schedule add "0 9 * * 1-5" "check emails" email  # Add cron task
+node dist/src/cli/cli.js schedule list                                      # List all tasks
+node dist/src/cli/cli.js schedule remove <id>                               # Remove a task
+node dist/src/cli/cli.js schedule enable <id>                               # Enable a task
+node dist/src/cli/cli.js schedule disable <id>                              # Disable a task
+node dist/src/cli/cli.js daemon                                             # Start scheduler daemon
 ```
 
 ## Environment variables
@@ -550,7 +558,8 @@ src/
   eval/           → Model evaluation framework + inline retry + benchmarks + persistent reports
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
-  mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
+  scheduler/      → Cron parser + task scheduler (zero-dep, persistent)
+  mcp/            → MCP server (9 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
   echo/           → Test domain (7 operations, 5 eval goals)
@@ -561,12 +570,12 @@ domains/
   git/            → Git version control (28 ops, 5 goals)
   email/          → Email IMAP/SMTP via Himalaya (15 ops, 5 goals)
 tests/
-  unit/           → 263 unit tests, 31 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer)
+  unit/           → 303 unit tests, 37 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer, scheduler)
 ```
 
 ## MCP server
 
-ctt-shell exposes its full pipeline as 8 MCP tools over stdio:
+ctt-shell exposes its full pipeline as 9 MCP tools over stdio:
 
 | Tool | Description |
 |------|-------------|
@@ -578,6 +587,7 @@ ctt-shell exposes its full pipeline as 8 MCP tools over stdio:
 | `ctt_recall` | Build CTT context for a goal (without executing) |
 | `ctt_shell` | Execute shell commands with RBAC policy enforcement |
 | `ctt_context` | Manage user-provided business context (add, list, remove, load) |
+| `ctt_schedule` | Manage scheduled tasks (add, list, remove, enable, disable) |
 
 ### Claude Desktop integration
 
@@ -600,6 +610,49 @@ Add to `claude_desktop_config.json`:
 ```
 
 This lets Claude (or any MCP client) search operations, compose plans, execute workflows, and learn from results across all 7 domains.
+
+## Scheduler (autonomous cron)
+
+Built-in task scheduler that wakes the agent at specific times to execute goals autonomously.
+
+### How it works
+
+- **Zero-dependency cron parser** — standard 5-field syntax (`minute hour day-of-month month day-of-week`) plus shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`)
+- **Persistent storage** — tasks saved as JSON in `.ctt-shell/store/schedule/`, survive restarts
+- **Daemon mode** — `ctt-shell daemon` starts a 60-second interval loop that checks cron matches and executes matching goals via the full autonomous pipeline (recall → plan → execute → learn)
+- **Execution log** — JSONL log in `.ctt-shell/logs/scheduler.jsonl` tracks every run with timing, success/failure, and error details
+- **MCP integration** — `ctt_schedule` tool lets any MCP client manage tasks (add, list, remove, enable, disable)
+
+### Examples
+
+```bash
+# Check emails every weekday at 9 AM
+node dist/src/cli/cli.js schedule add "0 9 * * 1-5" "check emails and summarize unread" email
+
+# Deploy backup every night at midnight
+node dist/src/cli/cli.js schedule add "@daily" "export database and commit backup" wp-cli
+
+# Monitor site every 30 minutes
+node dist/src/cli/cli.js schedule add "*/30 * * * *" "check site health and report errors" wordpress
+
+# List all scheduled tasks
+node dist/src/cli/cli.js schedule list
+
+# Start the daemon (keeps running, executes matching tasks every minute)
+node dist/src/cli/cli.js daemon
+```
+
+### Cron syntax
+
+| Field | Values | Special |
+|-------|--------|---------|
+| Minute | 0-59 | `*`, `*/N`, `N-M`, `N,M,O` |
+| Hour | 0-23 | same |
+| Day of month | 1-31 | same |
+| Month | 1-12 | same |
+| Day of week | 0-7 (0,7=Sun) | same |
+
+Shortcuts: `@daily` (0 0 * * *), `@hourly` (0 * * * *), `@weekly` (0 0 * * 0), `@monthly` (0 0 1 * *), `@yearly` (0 0 1 1 *)
 
 ## Context loader (business knowledge)
 
@@ -643,19 +696,20 @@ Basic plan $29/month, Premium $99/month...
 npm run build && npm test
 ```
 
-263 tests across 31 suites covering:
+303 tests across 37 suites covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Embeddings** (10) — RRF fusion, weights, deduplication, empty inputs
 - **Response normalizer** (15) — JSON extraction, truncation recovery, thinking tags, trailing commas
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
 - **Domain adapters** (85) — all 7 adapters: knowledge, validation, execution, normalizers
-- **MCP server** (11) — protocol handshake, tool listing, all 8 tools, error handling
+- **MCP server** (11) — protocol handshake, tool listing, all 9 tools, error handling
 - **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
 - **Context loader** (18) — addText, loadFile (markdown/json/txt), loadDirectory, list/remove/clear
 - **Agent** (21) — recall, contextToPrompt, learnSkill, learnFromError, learnFix
 - **Circuit breaker** (12) — threshold, reset, antipatterns, lazy load, extractHost
 - **Sanitizer** (22) — 4-layer sanitization, round-trip, nested objects, known prefixes
+- **Scheduler** (40) — cron parser (wildcards, ranges, lists, intervals, shortcuts), cronMatches, validateCron, describeCron, nextRun, task CRUD, persistence, tick execution/skip/failure
 
 ## How CTT works
 

@@ -24,6 +24,8 @@ import { contextToPrompt, recall } from '../agent/recall.js';
 import { CircuitBreaker } from '../guardrails/circuit-breaker.js';
 import { startMcpServer } from '../mcp/server.js';
 import { ContextLoader } from '../context/loader.js';
+import { Scheduler } from '../scheduler/scheduler.js';
+import { describeCron } from '../scheduler/cron-parser.js';
 
 const CTT_ROOT = join(process.cwd(), '.ctt-shell');
 const STORE_ROOT = join(CTT_ROOT, 'store');
@@ -97,6 +99,11 @@ Commands:
   context remove <id>         Remove a context entry
   context clear               Remove all context entries
   context load-dir [path]     Load all files from context directory
+  schedule add <cron> <goal>  Schedule a recurring task (cron expression)
+  schedule list               List scheduled tasks
+  schedule remove <id>        Remove a scheduled task
+  schedule enable/disable <id> Enable or disable a task
+  daemon                      Start scheduler daemon (long-running)
   mcp                         Start MCP server (stdio transport)
   help                        Show this help
 
@@ -383,6 +390,105 @@ Environment:
       } else {
         console.error('Usage: ctt-shell context <add|list|remove|clear|load-dir>');
       }
+      break;
+    }
+
+    case 'schedule': {
+      const scheduler = new Scheduler(CTT_ROOT);
+      const sub = args[1];
+
+      if (sub === 'add') {
+        const cron = args[2];
+        const goal = args.slice(3).join(' ');
+        if (!cron || !goal) { console.error('Usage: ctt-shell schedule add "<cron>" "<goal>" [--domain <id>]'); process.exit(1); }
+        const domainFlag3 = args.indexOf('--domain');
+        const domainId3 = domainFlag3 >= 0 ? args[domainFlag3 + 1] : undefined;
+        try {
+          const task = scheduler.add(cron, goal, domainId3);
+          console.log(`Scheduled task ${task.id}:`);
+          console.log(`  Cron: ${task.cron} (${describeCron(task.cron)})`);
+          console.log(`  Goal: ${task.goal}`);
+          if (task.domainId) console.log(`  Domain: ${task.domainId}`);
+          if (task.nextRunAt) console.log(`  Next run: ${task.nextRunAt}`);
+        } catch (e) {
+          console.error(e instanceof Error ? e.message : String(e));
+          process.exit(1);
+        }
+      } else if (sub === 'list') {
+        const tasks = scheduler.list();
+        if (tasks.length === 0) {
+          console.log('No scheduled tasks. Use "ctt-shell schedule add" to create one.');
+        } else {
+          console.log(`Scheduled tasks (${tasks.length}):`);
+          for (const t of tasks) {
+            const status = t.enabled ? 'enabled' : 'disabled';
+            const last = t.lastRunAt ? ` | Last: ${t.lastResult} (${t.lastRunAt})` : '';
+            console.log(`  ${t.id}: [${status}] ${t.cron} → "${t.goal}"${last}`);
+            console.log(`    ${describeCron(t.cron)} | Runs: ${t.runCount} | Fails: ${t.failCount}${t.nextRunAt ? ' | Next: ' + t.nextRunAt : ''}`);
+          }
+        }
+      } else if (sub === 'remove') {
+        const id = args[2];
+        if (!id) { console.error('Usage: ctt-shell schedule remove <id>'); process.exit(1); }
+        if (scheduler.remove(id)) {
+          console.log(`Removed task: ${id}`);
+        } else {
+          console.error(`Task not found: ${id}`);
+        }
+      } else if (sub === 'enable') {
+        const id = args[2];
+        if (!id) { console.error('Usage: ctt-shell schedule enable <id>'); process.exit(1); }
+        if (scheduler.setEnabled(id, true)) {
+          console.log(`Enabled task: ${id}`);
+        } else {
+          console.error(`Task not found: ${id}`);
+        }
+      } else if (sub === 'disable') {
+        const id = args[2];
+        if (!id) { console.error('Usage: ctt-shell schedule disable <id>'); process.exit(1); }
+        if (scheduler.setEnabled(id, false)) {
+          console.log(`Disabled task: ${id}`);
+        } else {
+          console.error(`Task not found: ${id}`);
+        }
+      } else {
+        console.error('Usage: ctt-shell schedule <add|list|remove|enable|disable>');
+      }
+      break;
+    }
+
+    case 'daemon': {
+      const { provider: daemonProvider, config: daemonConfig } = getLlmProvider();
+      const daemonLlm = createProvider(daemonProvider, daemonConfig);
+      const daemonAgent = new AutonomousAgent({ store, search, domains, llm: daemonLlm });
+
+      const scheduler2 = new Scheduler(CTT_ROOT);
+      const tasks = scheduler2.list().filter(t => t.enabled);
+
+      console.log(`Starting daemon with ${tasks.length} active task(s)`);
+      console.log(`LLM: ${daemonProvider}`);
+      for (const t of tasks) {
+        console.log(`  ${t.id}: ${t.cron} → "${t.goal}"`);
+      }
+      console.log('');
+      console.log('Checking every 60 seconds. Press Ctrl+C to stop.');
+
+      scheduler2.start({
+        async run(goal, domainId) {
+          console.log(`[${new Date().toISOString()}] Running: "${goal}"`);
+          const result = await daemonAgent.run(goal, domainId);
+          const icon = result.success ? '+' : 'x';
+          console.log(`[${new Date().toISOString()}] ${icon} ${result.success ? 'Success' : 'Failed: ' + result.error}`);
+          return {
+            success: result.success,
+            error: result.error,
+            steps: result.plan?.steps.length,
+          };
+        },
+      });
+
+      // Keep process alive
+      await new Promise(() => {});
       break;
     }
 

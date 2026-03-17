@@ -34,7 +34,7 @@ describe('McpServer', () => {
     assert.equal(serverInfo.name, 'ctt-shell');
   });
 
-  it('returns tool list with 8 tools', async () => {
+  it('returns tool list with 9 tools', async () => {
     const res = await server.handleRequest({
       jsonrpc: '2.0',
       id: 2,
@@ -42,7 +42,7 @@ describe('McpServer', () => {
     });
 
     const result = res.result as { tools: Array<{ name: string }> };
-    assert.equal(result.tools.length, 8);
+    assert.equal(result.tools.length, 9);
     const names = result.tools.map(t => t.name).sort();
     assert.deepEqual(names, [
       'ctt_context',
@@ -50,6 +50,7 @@ describe('McpServer', () => {
       'ctt_extract',
       'ctt_list_domains',
       'ctt_recall',
+      'ctt_schedule',
       'ctt_search',
       'ctt_shell',
       'ctt_store_stats',
