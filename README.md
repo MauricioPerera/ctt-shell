@@ -39,15 +39,30 @@ An agent receives a natural language goal, searches its CTT memory for relevant 
 
 33 goals across 6 domains — **zero runtime dependencies**, just Node.js built-ins:
 
-| Model | Size | JSON parse | Plan valid | Composed | Avg latency |
-|-------|------|-----------|-----------|----------|-------------|
-| **Llama 3.2** (Cloudflare) | **1B** | **100%** | **100%** | **100%** | **1.2s** |
-| Llama 3.2 (Cloudflare) | 3B | 96% | 96% | 96% | 1.5s |
-| Granite 4.0 H-Micro (Cloudflare) | ~1B | 91% | 91% | 91% | 6.5s |
-| GLM 4.7 Flash (Cloudflare) | ~2B | 94% | 94% | 94% | 11.8s |
-| Gemma 3 (Cloudflare) | 12B | 100% | 100% | 100% | 4.2s |
+| Model | Size | JSON% | Plan% | Comp% | Exec% | Steps | Latency |
+|-------|------|-------|-------|-------|-------|-------|---------|
+| **Qwen3 30B A3B** (Cloudflare) | **3B active** | **100%** | **100%** | **100%** | **100%** | 2.1 | 3.2s |
+| **Llama 3.2** (Cloudflare) | **1B** | **100%** | **100%** | **100%** | **100%** | 2.5 | 2.3s |
+| Llama 3.1 8B Fast (Cloudflare) | 8B | 97% | 97% | 97% | 97% | 2.0 | 2.0s |
+| Llama 3.2 (Cloudflare) | 3B | 94% | 94% | 94% | 94% | 2.1 | 1.6s |
+| Gemma 3 (Cloudflare) | 12B | 97% | 97% | 97% | 97% | 2.0 | 6.7s |
+| Granite 4.0 H-Micro (Cloudflare) | ~1B | 91% | 91% | 91% | 91% | 2.0 | 7.0s |
+| GLM 4.7 Flash (Cloudflare) | ~2B | 97% | 97% | 97% | 97% | 2.0 | 9.1s |
+| Gemma3 270M (Ollama, local) | **268M** | 91% | 88% | 88% | 88% | 1.8 | 78.2s |
 
-A **1 billion parameter Llama 3.2** composes all 33 multi-step goals correctly — faster and more accurate than models 3-12x its size. CTT structured context at inference time fully compensates for parameter count.
+A **1B Llama 3.2** and a **3B-active Qwen3 MoE** both achieve **100%** across all 33 multi-step goals — faster and more accurate than models 4-12x their size. Even a **268M parameter Gemma3** running fully local via Ollama hits 88%. CTT structured context at inference time compensates for parameter count.
+
+### Hybrid search impact (embeddings)
+
+Optional semantic embeddings via [embeddinggemma](https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF) (300M, runs locally via llama-server) improve weaker models:
+
+| Model | TF-IDF only | + Embeddings | Delta |
+|-------|-------------|-------------|-------|
+| Llama 3.2 1B | 100% all, 2.4 steps | 100% all, 2.2 steps | steps -0.2, latency -9% |
+| Llama 3.2 3B | 97% all, 2.2 steps | 97% all, 2.1 steps | steps -0.1, latency -17% |
+| **Granite 4.0** | **91% all** | **97% all** | **+6pp quality**, latency -6% |
+
+Semantic search helps most where it matters: Granite jumps from 91% → 97%. All models generate more concise plans and fewer retries. Models already at 100% see efficiency gains only.
 
 ## Quick start
 
@@ -85,7 +100,7 @@ MCP Interface    → stdio | HTTP/SSE | CLI
 Agent Layer      → Autonomous | Interactive | Eval Runner
 Guard Rails      → Response Normalizer | Plan Normalizer | Circuit Breaker | Inline Retry | Sanitizer
 Domain Layer     → DomainRegistry | DomainAdapter interface | Knowledge Resolver
-CTT Memory       → Store (SHA-256) | Search (TF-IDF) | Skills Lifecycle
+CTT Memory       → Store (SHA-256) | Search (TF-IDF + Embedding/MRL) | Skills Lifecycle
 Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audit Log
 ```
 
@@ -465,7 +480,7 @@ npm run build && npm test
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 167 unit tests
+npm test                                         # Run 222 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -473,6 +488,10 @@ node dist/src/cli/cli.js exec <goal>             # Autonomous: recall → plan �
 node dist/src/cli/cli.js eval                    # Evaluate all 33 goals across all domains
 node dist/src/cli/cli.js eval --domain wordpress # Evaluate single domain
 node dist/src/cli/cli.js eval --models "cf:@cf/meta/llama-3.2-3b-instruct"
+node dist/src/cli/cli.js eval --exec             # Enable execution testing (Exec% > 0)
+node dist/src/cli/cli.js eval --embeddings       # Enable hybrid semantic search
+node dist/src/cli/cli.js eval --verbose          # Per-goal detailed output
+node dist/src/cli/cli.js eval --baseline <path>  # Compare vs saved baseline report
 node dist/src/cli/cli.js status                  # Store statistics
 node dist/src/cli/cli.js domain list             # List registered domains
 node dist/src/cli/cli.js context add info.md     # Load business context from file
@@ -480,6 +499,7 @@ node dist/src/cli/cli.js context add --text "…"  # Add inline context text
 node dist/src/cli/cli.js context list            # List loaded context entries
 node dist/src/cli/cli.js context clear           # Remove all context entries
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
+node dist/src/cli/cli.js benchmark               # Run performance benchmarks
 ```
 
 ## Environment variables
@@ -492,6 +512,15 @@ node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 | `ANTHROPIC_API_KEY` | Claude |
 | `OPENAI_API_KEY` | OpenAI |
 | `OLLAMA_MODEL` | Local Ollama (default: `qwen2.5:3b`) |
+
+### Embedding provider (optional, for hybrid search)
+
+| Variable | Description |
+|----------|-------------|
+| `EMBEDDING_PROVIDER` | `openai` (llama-server, vLLM), `ollama`, or `cloudflare` |
+| `EMBEDDING_BASE_URL` | Server URL (e.g., `http://localhost:9999`) |
+| `EMBEDDING_MODEL` | Model name (default: `embeddinggemma`) |
+| `EMBEDDING_CACHE_DIR` | Cache directory (default: `.ctt-shell/embeddings-cache`) |
 
 ### Domain connections (optional)
 
@@ -510,12 +539,12 @@ Config file alternative: `.ctt-shell/config.json`
 src/
   types/          → Entity types (Knowledge, Skill, Memory, Profile) + ExecutionPlan
   storage/        → Content-addressable filesystem store (SHA-256 dedup)
-  search/         → TF-IDF search with Porter stemming + injectable expansions
+  search/         → TF-IDF + embedding hybrid search, Matryoshka cascade, RRF fusion
   guardrails/     → Response normalizer, plan normalizer, circuit breaker, sanitizer
   domain/         → DomainAdapter interface + DomainRegistry
   agent/          → Autonomous pipeline (recall→plan→normalize→validate→execute→learn)
-  llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI)
-  eval/           → Model evaluation framework + inline retry
+  llm/            → LLM providers (Claude, OpenAI, Ollama, Cloudflare Workers AI, llama.cpp/llamafile)
+  eval/           → Model evaluation framework + inline retry + benchmarks + persistent reports
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
   mcp/            → MCP server (8 tools, stdio JSON-RPC 2.0)
@@ -528,7 +557,7 @@ domains/
   wp-cli/         → WordPress via WP-CLI terminal (25+ ops, 5 goals)
   git/            → Git version control (28 ops, 5 goals)
 tests/
-  unit/           → 167 unit tests (store, search, normalizers, adapters, MCP, shell, context)
+  unit/           → 222 unit tests, 24 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer)
 ```
 
 ## MCP server
@@ -610,15 +639,19 @@ Basic plan $29/month, Premium $99/month...
 npm run build && npm test
 ```
 
-167 tests covering:
+222 tests across 24 suites covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
-- **Response normalizer** (12) — JSON extraction, truncation recovery, thinking tags
+- **Embeddings** (10) — RRF fusion, weights, deduplication, empty inputs
+- **Response normalizer** (15) — JSON extraction, truncation recovery, thinking tags, trailing commas
 - **Plan normalizer** (11) — dependency fixing, orphan chaining, circular deps
-- **Domain adapters** (67) — all 6 adapters: knowledge, validation, execution, normalizers
+- **Domain adapters** (64) — all 6 adapters: knowledge, validation, execution, normalizers
 - **MCP server** (11) — protocol handshake, tool listing, all 8 tools, error handling
 - **Shell engine** (34) — parser (10), policy/RBAC (13), executor (6), audit log (5)
-- **Context loader** (18) — addText, loadFile (markdown/json/txt), loadDirectory, list/remove/clear, TF-IDF integration
+- **Context loader** (18) — addText, loadFile (markdown/json/txt), loadDirectory, list/remove/clear
+- **Agent** (21) — recall, contextToPrompt, learnSkill, learnFromError, learnFix
+- **Circuit breaker** (12) — threshold, reset, antipatterns, lazy load, extractHost
+- **Sanitizer** (22) — 4-layer sanitization, round-trip, nested objects, known prefixes
 
 ## How CTT works
 
@@ -631,7 +664,7 @@ CTT approach: give a small model the right context at inference time:
 3. **Memory entities** warn about past failures ("don't use PATCH, use POST for WordPress")
 4. **Guard rails** catch and fix the remaining mistakes automatically
 
-The result: a **1B model** with CTT context achieves **100% composition rate** across 33 multi-domain goals — outperforming the 3B model (96%) and matching the 12B model. The same models without CTT context produce unparseable JSON most of the time.
+The result: a **1B model** with CTT context achieves **100% composition and execution rate** across 33 multi-domain goals — outperforming models 3-12x its size. Even a **268M model** running fully local hits 88%. Add optional semantic embeddings and a 91% model jumps to 97%. The same models without CTT context produce unparseable JSON most of the time.
 
 ## License
 

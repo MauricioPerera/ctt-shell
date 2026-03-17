@@ -283,6 +283,16 @@ llamafile:gemma3:270m (local)            91%     85%     85%     85%     1.9   8
 ```
 Qwen3 30B A3B (MoE, 3B active params) and Llama 3.2 1B achieve 100% across all metrics. The 1B Llama remains fastest (1626-2269ms range). CTT context compensates for parameter count — even 1B models match 30B. Gemma3 270M running 100% locally via Ollama/llamafile achieves 85-88% execution with only 268M parameters (Q8_0) — the smallest model tested, proving CTT works even at sub-1B scale without any cloud API dependency.
 
+### Hybrid search impact (--embeddings, embeddinggemma 300M via llama-server)
+```
+Model                                 TF-IDF only          + Embeddings (RRF)    Delta
+-------------------------------------------------------------------------------------
+@cf/meta/llama-3.2-1b-instruct       100% all, 2.4 steps  100% all, 2.2 steps  steps -0.2, latency -9%
+@cf/meta/llama-3.2-3b-instruct        97% all, 2.2 steps   97% all, 2.1 steps  steps -0.1, latency -17%
+@cf/ibm-granite/granite-4.0-h-micro    91% all, 2.1 steps   97% all, 2.0 steps  +6pp quality, latency -6%
+```
+Semantic embeddings improve weaker models most: Granite jumps from 91% to 97% (+6pp). All models generate fewer steps (more concise plans) and lower latency (fewer retries). Models already at 100% see no quality change but benefit from efficiency gains.
+
 ## Benchmark Harness (src/eval/benchmark.ts)
 Performance measurement for core operations. Run with `ctt-shell benchmark`.
 

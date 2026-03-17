@@ -210,8 +210,19 @@ Environment:
       // Parse extra flags
       const execFlag = args.includes('--exec');
       const verboseFlag = args.includes('--verbose');
+      const embeddingsFlag = args.includes('--embeddings');
       const baselineFlag = args.indexOf('--baseline');
       const baselinePath = baselineFlag >= 0 ? args[baselineFlag + 1] : undefined;
+
+      // Enable hybrid search if --embeddings flag or EMBEDDING_PROVIDER is set
+      if (embeddingsFlag || process.env.EMBEDDING_PROVIDER) {
+        const enabled = await search.enableEmbeddings();
+        if (enabled) {
+          console.log(`Embeddings enabled (${process.env.EMBEDDING_PROVIDER ?? 'ollama'})`);
+        } else {
+          console.log('Warning: embeddings requested but provider not available, using TF-IDF only');
+        }
+      }
 
       // Build domain adapter map for execution testing
       const adapterMap = new Map<string, import('../domain/adapter.js').DomainAdapter>();
