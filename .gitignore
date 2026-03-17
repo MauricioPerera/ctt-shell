@@ -6,3 +6,5 @@ dist/
 .env
 .DS_Store
 Thumbs.db
+tools/
+scripts/*.json

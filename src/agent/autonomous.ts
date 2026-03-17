@@ -103,7 +103,7 @@ export class AutonomousAgent {
     try {
       // 1. RECALL
       emit('recall', `Searching context for: ${goal}`);
-      const ctx = recall(goal, this.search, this.circuitBreaker, { compact: this.compact });
+      const ctx = await recall(goal, this.search, this.circuitBreaker, { compact: this.compact });
       emit('recall', `Found ${ctx.knowledge.length} operations, ${ctx.skills.length} skills, ${ctx.antiPatterns.length} anti-patterns`);
 
       // 2. PLAN (with inline retry on parse failure)

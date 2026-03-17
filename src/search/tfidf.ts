@@ -4,6 +4,7 @@
  */
 
 import type { Entity, Knowledge, Skill, Memory, Profile } from '../types/entities.js';
+import { EmbeddingSearch, hybridSearch, createEmbeddingProvider, type EmbeddingConfig } from './embedding.js';
 
 // ─── Porter Stemmer (simplified) ─────────────────────────────────────────────
 
@@ -100,6 +101,50 @@ export class SearchEngine {
   private docs: IndexedDoc[] = [];
   private df: Map<string, number> = new Map();
   private totalDocs = 0;
+  private embedding?: EmbeddingSearch;
+
+  /**
+   * Enable hybrid search with embedding model.
+   * Auto-detects provider from env vars if no config given:
+   *   EMBEDDING_PROVIDER=openai|ollama|cloudflare (default: ollama)
+   *   EMBEDDING_BASE_URL=http://localhost:9999 (for openai/ollama provider)
+   *   EMBEDDING_MODEL=embeddinggemma (model name)
+   *   EMBEDDING_CACHE_DIR=.ctt-shell/cache (optional disk cache)
+   */
+  async enableEmbeddings(config?: EmbeddingConfig): Promise<boolean> {
+    // Auto-detect provider from env vars if no provider specified
+    if (!config?.provider) {
+      const providerType = (process.env.EMBEDDING_PROVIDER ?? 'ollama') as 'ollama' | 'cloudflare' | 'openai';
+      const baseUrl = process.env.EMBEDDING_BASE_URL;
+      const model = process.env.EMBEDDING_MODEL ?? config?.model;
+      const cacheDir = process.env.EMBEDDING_CACHE_DIR ?? config?.cacheDir;
+
+      const provider = createEmbeddingProvider(providerType, {
+        baseUrl: baseUrl ?? config?.baseUrl,
+        model,
+        apiKey: process.env.CF_API_KEY ?? process.env.OPENAI_API_KEY,
+        accountId: process.env.CF_ACCOUNT_ID,
+      });
+
+      config = { ...config, provider, cacheDir };
+    }
+
+    const emb = new EmbeddingSearch(config);
+    if (await emb.isAvailable()) {
+      this.embedding = emb;
+      // Index existing docs
+      if (this.docs.length > 0) {
+        await emb.index(this.docs.map(d => d.entity));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** Check if embeddings are enabled */
+  get embeddingsEnabled(): boolean {
+    return !!this.embedding;
+  }
 
   /** Replace all query expansions (pre-stems values) */
   setExpansions(newExpansions: Record<string, string[]>): void {
@@ -153,6 +198,21 @@ export class SearchEngine {
     }
   }
 
+  /** Sync embedding index with current entities (call after index/addToIndex) */
+  async syncEmbeddings(): Promise<void> {
+    if (!this.embedding) return;
+    const entities = this.docs.map(d => d.entity);
+    await this.embedding.index(entities);
+  }
+
+  /** Incrementally add entities and sync embedding index */
+  async addToIndexAsync(entities: Entity[]): Promise<void> {
+    this.addToIndex(entities);
+    if (this.embedding) {
+      await this.embedding.addToIndex(entities);
+    }
+  }
+
   /** Incrementally add entities to the index without full rebuild */
   addToIndex(entities: Entity[]): void {
     for (const entity of entities) {
@@ -181,8 +241,25 @@ export class SearchEngine {
     }
   }
 
-  /** Search for entities matching a query */
+  /** Search for entities matching a query (TF-IDF only, sync) */
   search(query: string, limit = 20): SearchResult[] {
+    return this.tfidfSearch(query, limit);
+  }
+
+  /** Search with hybrid TF-IDF + embedding (async, uses RRF when embeddings enabled) */
+  async hybridSearch(query: string, limit = 20): Promise<SearchResult[]> {
+    const tfidfResults = this.tfidfSearch(query, limit);
+
+    if (this.embedding) {
+      const embeddingResults = await this.embedding.search(query, limit);
+      return hybridSearch(tfidfResults, embeddingResults, limit);
+    }
+
+    return tfidfResults;
+  }
+
+  /** Pure TF-IDF search (no embeddings) */
+  tfidfSearch(query: string, limit = 20): SearchResult[] {
     const queryTokens = tokenize(query);
     const expanded = expandQuery(queryTokens);
 

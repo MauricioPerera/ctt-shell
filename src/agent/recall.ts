@@ -22,15 +22,18 @@ export interface RecallOptions {
   compact?: boolean;       // reduced output for small models
 }
 
-export function recall(
+export async function recall(
   goal: string,
   search: SearchEngine,
   circuitBreaker: CircuitBreaker,
   options: RecallOptions = {},
-): CTTContext {
+): Promise<CTTContext> {
   const { maxKnowledge = 10, maxSkills = 3, maxMemories = 5 } = options;
 
-  const results = search.search(goal, maxKnowledge + maxSkills + maxMemories + 10);
+  // Use hybrid search (TF-IDF + embeddings) when embeddings are enabled
+  const results = search.embeddingsEnabled
+    ? await search.hybridSearch(goal, maxKnowledge + maxSkills + maxMemories + 10)
+    : search.search(goal, maxKnowledge + maxSkills + maxMemories + 10);
 
   const knowledge: Knowledge[] = [];
   const skills: Skill[] = [];

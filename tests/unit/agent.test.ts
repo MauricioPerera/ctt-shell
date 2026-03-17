@@ -108,12 +108,12 @@ describe('Recall', () => {
   beforeEach(() => setup());
   afterEach(() => teardown());
 
-  it('returns knowledge, skills, and memories from search', () => {
+  it('returns knowledge, skills, and memories from search', async () => {
     const k = store.save(makeKnowledge());
     const s = store.save(makeSkill());
     search.index([k, s]);
 
-    const ctx = recall('create item', search, new CircuitBreaker(store));
+    const ctx = await recall('create item', search, new CircuitBreaker(store));
     assert.ok(ctx.knowledge.length > 0);
     // Skills may or may not match depending on search relevance
     assert.ok(Array.isArray(ctx.skills));
@@ -121,7 +121,7 @@ describe('Recall', () => {
     assert.ok(Array.isArray(ctx.antiPatterns));
   });
 
-  it('respects maxKnowledge limit', () => {
+  it('respects maxKnowledge limit', async () => {
     const entities: Knowledge[] = [];
     for (let i = 0; i < 15; i++) {
       entities.push(store.save(makeKnowledge({
@@ -131,28 +131,28 @@ describe('Recall', () => {
     }
     search.index(entities);
 
-    const ctx = recall('create item', search, new CircuitBreaker(store), { maxKnowledge: 5 });
+    const ctx = await recall('create item', search, new CircuitBreaker(store), { maxKnowledge: 5 });
     assert.ok(ctx.knowledge.length <= 5);
   });
 
-  it('filters deprecated skills', () => {
+  it('filters deprecated skills', async () => {
     const k = store.save(makeKnowledge());
     const deprecated = store.save(makeSkill({ status: 'deprecated', name: 'Old skill' }));
     search.index([k, deprecated]);
 
-    const ctx = recall('create item', search, new CircuitBreaker(store));
+    const ctx = await recall('create item', search, new CircuitBreaker(store));
     const depSkills = ctx.skills.filter(s => s.status === 'deprecated');
     assert.equal(depSkills.length, 0);
   });
 
-  it('includes anti-patterns from circuit breaker', () => {
+  it('includes anti-patterns from circuit breaker', async () => {
     const k = store.save(makeKnowledge());
     search.index([k]);
 
     const cb = new CircuitBreaker(store);
     cb.recordError('echo.items.create', 'Timeout error', 'Increase timeout');
 
-    const ctx = recall('create item', search, cb);
+    const ctx = await recall('create item', search, cb);
     assert.ok(ctx.antiPatterns.length > 0);
     assert.equal(ctx.antiPatterns[0].target, 'echo.items.create');
   });

@@ -118,7 +118,9 @@ Environment:
     case 'search': {
       const query = args.slice(1).join(' ');
       if (!query) { console.error('Usage: ctt-shell search <query>'); process.exit(1); }
-      const results = search.search(query, 10);
+      const results = search.embeddingsEnabled
+        ? await search.hybridSearch(query, 10)
+        : search.search(query, 10);
       if (results.length === 0) {
         console.log('No results found.');
       } else {
@@ -221,8 +223,8 @@ Environment:
       // Generate context for goals
       const circuitBreaker = new CircuitBreaker(store);
       const evaluator = new ModelEvaluator({
-        contextGenerator: (goal, compact) => {
-          const ctx = recall(goal, search, circuitBreaker, { compact });
+        contextGenerator: async (goal, compact) => {
+          const ctx = await recall(goal, search, circuitBreaker, { compact });
           return contextToPrompt(ctx, compact);
         },
         domainAdapters: execFlag ? adapterMap : undefined,

@@ -14,7 +14,7 @@ MCP Interface    → stdio | HTTP/SSE | CLI
 Agent Layer      → Autonomous | Interactive | Eval Runner
 Guard Rails      → Response Normalizer | Plan Normalizer | Circuit Breaker | Inline Retry | Sanitizer
 Domain Layer     → DomainRegistry | DomainAdapter interface | Knowledge Resolver
-CTT Memory       → Store (SHA-256) | Search (TF-IDF) | Skills Lifecycle
+CTT Memory       → Store (SHA-256) | Search (TF-IDF + Embedding/MRL) | Skills Lifecycle
 Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audit Log
 ```
 
@@ -23,7 +23,7 @@ Shell Engine     → Parser | Executor | RBAC Policy (readonly/dev/admin) | Audi
 src/
   types/          → Entity types (Knowledge, Skill, Memory, Profile) + ExecutionPlan
   storage/        → Content-addressable filesystem store (SHA-256 dedup)
-  search/         → TF-IDF search with Porter stemming, incremental indexing, injectable domain expansions
+  search/         → TF-IDF + embedding hybrid search, Porter stemming, Matryoshka cascade, RRF fusion
   guardrails/     → Response normalizer, plan normalizer, circuit breaker, sanitizer
   domain/         → DomainAdapter interface + DomainRegistry
   agent/          → Autonomous pipeline (recall→plan→normalize→validate→execute→learn)
@@ -74,6 +74,10 @@ node dist/src/cli/cli.js benchmark               # Run performance benchmarks
 - `ANTHROPIC_API_KEY` — for Claude LLM provider
 - `OPENAI_API_KEY` — for OpenAI LLM provider
 - `OLLAMA_MODEL` — for local Ollama (default: qwen2.5:3b)
+- `EMBEDDING_PROVIDER` — embedding backend: ollama, openai, cloudflare (default: ollama)
+- `EMBEDDING_BASE_URL` — embedding server URL (e.g. http://localhost:9999 for llama-server)
+- `EMBEDDING_MODEL` — embedding model name (default: embeddinggemma)
+- `EMBEDDING_CACHE_DIR` — disk cache for embeddings (default: none)
 - `CF_API_KEY` — for Cloudflare Workers AI
 - `CF_ACCOUNT_ID` — for Cloudflare Workers AI
 - `WP_BASE_URL` — WordPress instance URL (for wordpress domain)
@@ -174,7 +178,7 @@ See README.md for full template with code examples.
 - Query expansions: commit→save/snapshot, branch→fork/feature, merge→combine/integrate, push→upload/deploy
 
 ## Key pipeline (Autonomous Agent)
-1. RECALL — TF-IDF search finds relevant Knowledge + Skills + Memories
+1. RECALL — Hybrid search (TF-IDF + embeddings via RRF) finds relevant Knowledge + Skills + Memories
 2. PLAN — LLM generates ExecutionPlan JSON with CTT context (few-shot + anti-patterns)
 3. NORMALIZE — Response normalizer (JSON extraction) + Plan normalizer (structural fixes)
 4. VALIDATE — DomainAdapter.validate()
@@ -182,10 +186,20 @@ See README.md for full template with code examples.
 6. LEARN — Success→save Skill (experimental) + incremental index. Failure→save Memory + update Circuit Breaker + incremental index
 7. ENRICH (optional) — If `enrichLlm` configured, small local LLM classifies error memories (category, tags, severity, fix suggestion) via 3-4 parallel single-task prompts
 
-### Search indexing strategy
+### Search architecture
+- **TF-IDF** (`search.search()`): keyword matching with Porter stemming + query expansion. Sync, zero dependencies.
+- **Embedding** (`search.hybridSearch()`): semantic search via Ollama embeddinggemma (768d). Uses Matryoshka Representation Learning (MRL) cascade:
+  - Stage 1: 128d — fast coarse filter (eliminates ~80% of candidates)
+  - Stage 2: 256d — medium re-rank (narrows to top candidates)
+  - Stage 3: 768d — full precision final ranking
+- **Hybrid**: Reciprocal Rank Fusion (RRF) combines TF-IDF (0.4 weight) + embedding (0.6 weight) results
 - **Full rebuild** (`search.index()`): used once at cold startup
-- **Incremental** (`search.addToIndex()`): used after knowledge extraction, learning, context loading. ~115x faster than full rebuild.
+- **Incremental** (`search.addToIndex()` / `addToIndexAsync()`): used after knowledge extraction, learning, context loading. ~115x faster than full rebuild.
 - **Query expansions**: domain synonyms are pre-stemmed at registration time (not per-search)
+- **Enable embeddings**: `search.enableEmbeddings()` — auto-detects provider from env vars
+- **Embedding providers**: Ollama (default), llama-server/OpenAI-compatible (6x faster), Cloudflare Workers AI
+- **Disk cache**: `EMBEDDING_CACHE_DIR=.ctt-shell/cache` — eliminates re-embedding on restart
+- **No-Ollama setup**: `scripts/start-embedding-server.sh` runs embeddinggemma via llama-server standalone
 
 ## Guard rails (proven in n8n-a2e + wp-a2e)
 - **Response normalizer**: strip thinking tags, extract JSON from code fences (including unclosed), fix trailing commas, auto-close truncated JSON to last complete object. Uses array-based string building and incremental bracket counting for performance.
@@ -357,7 +371,7 @@ Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
 
-## Test suite (232 tests, 25 suites)
+## Test suite (242 tests, 27 suites)
 ```
 tests/unit/
   domain-adapters.test.ts    → 64 tests: knowledge extraction, validation, normalization for all 6 domains
@@ -372,6 +386,7 @@ tests/unit/
   agent.test.ts              → 21 tests: recall, contextToPrompt, learnSkill, learnFromError, learnFix
   circuit-breaker.test.ts    → 12 tests: threshold, reset, antipatterns, lazy load, extractHost
   enrich.test.ts             → 10 tests: enrichMemory, applyEnrichment, enrichMemories batch, LLM error handling
+  embedding.test.ts          → 10 tests: hybridSearch RRF, weight params, deduplication, edge cases
 ```
 
 ## Zero runtime dependencies

@@ -72,13 +72,13 @@ export interface ComparisonResult {
 
 export class ModelEvaluator {
   private systemPrompt: string;
-  private contextGenerator?: (goal: string, compact: boolean) => string;
+  private contextGenerator?: (goal: string, compact: boolean) => string | Promise<string>;
   private domainAdapters?: Map<string, DomainAdapter>;
   private executeAfterPlan: boolean;
 
   constructor(opts?: {
     systemPrompt?: string;
-    contextGenerator?: (goal: string, compact: boolean) => string;
+    contextGenerator?: (goal: string, compact: boolean) => string | Promise<string>;
     domainAdapters?: Map<string, DomainAdapter>;
     executeAfterPlan?: boolean;
   }) {
@@ -111,7 +111,7 @@ export class ModelEvaluator {
     const isSmall = /\b(1b|3b|0\.5b|1\.8b|tiny)\b/.test(modelId);
 
     const context = this.contextGenerator
-      ? this.contextGenerator(goal.goal, isSmall)
+      ? await this.contextGenerator(goal.goal, isSmall)
       : '';
 
     const messages: LlmMessage[] = [

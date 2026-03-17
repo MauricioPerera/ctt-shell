@@ -220,7 +220,9 @@ const handlers: Record<string, ToolHandler> = {
   async ctt_search(args, { search }) {
     const query = args.query as string;
     const limit = (args.limit as number) || 10;
-    const results = search.search(query, limit);
+    const results = search.embeddingsEnabled
+      ? await search.hybridSearch(query, limit)
+      : search.search(query, limit);
 
     return results.map(r => {
       const e = r.entity as unknown as Record<string, unknown>;
@@ -317,7 +319,7 @@ const handlers: Record<string, ToolHandler> = {
     const goal = args.goal as string;
     const compact = (args.compact as boolean) ?? false;
     const circuitBreaker = new CircuitBreaker(store);
-    const ctx = recall(goal, search, circuitBreaker, { compact });
+    const ctx = await recall(goal, search, circuitBreaker, { compact });
 
     return {
       knowledge: ctx.knowledge.map(k => ({
