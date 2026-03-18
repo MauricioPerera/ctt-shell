@@ -15,9 +15,9 @@
     "ctt-shell": "dist/cli/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/web/static','dist/src/web/static',{recursive:true})\"",
     "dev": "tsc --watch",
-    "test": "node --test dist/tests/unit/domain-adapters.test.js dist/tests/unit/mcp-server.test.js dist/tests/unit/normalize-plan.test.js dist/tests/unit/normalize-response.test.js dist/tests/unit/shell.test.js dist/tests/unit/store.test.js dist/tests/unit/tfidf.test.js dist/tests/unit/context-loader.test.js dist/tests/unit/circuit-breaker.test.js dist/tests/unit/sanitize.test.js dist/tests/unit/agent.test.js dist/tests/unit/enrich.test.js dist/tests/unit/embedding.test.js dist/tests/unit/scheduler.test.js",
+    "test": "node --test dist/tests/unit/domain-adapters.test.js dist/tests/unit/mcp-server.test.js dist/tests/unit/normalize-plan.test.js dist/tests/unit/normalize-response.test.js dist/tests/unit/shell.test.js dist/tests/unit/store.test.js dist/tests/unit/tfidf.test.js dist/tests/unit/context-loader.test.js dist/tests/unit/circuit-breaker.test.js dist/tests/unit/sanitize.test.js dist/tests/unit/agent.test.js dist/tests/unit/enrich.test.js dist/tests/unit/embedding.test.js dist/tests/unit/scheduler.test.js dist/tests/unit/web-server.test.js",
     "clean": "rm -rf dist",
     "start": "node dist/cli/cli.js"
   },

@@ -475,6 +475,7 @@ npm run build && npm test
 - [ ] Eval goals — 3-5 goals (simple, medium, complex)
 - [ ] Register in `src/cli/cli.ts` (import, register, eval goals)
 - [ ] Register in `src/mcp/server.ts` (import, register)
+- [ ] Register in `src/web/server.ts` (import, register)
 - [ ] Add binary to `src/shell/policy.ts` dev role if not already there
 - [ ] Unit tests in `tests/unit/domain-adapters.test.ts`
 - [ ] `npm run build && npm test`
@@ -483,7 +484,7 @@ npm run build && npm test
 
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 303 unit tests
+npm test                                         # Run 324 unit tests
 
 node dist/src/cli/cli.js extract <domain>        # Extract Knowledge from domain
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
@@ -511,6 +512,10 @@ node dist/src/cli/cli.js schedule remove <id>                               # Re
 node dist/src/cli/cli.js schedule enable <id>                               # Enable a task
 node dist/src/cli/cli.js schedule disable <id>                              # Disable a task
 node dist/src/cli/cli.js daemon                                             # Start scheduler daemon
+
+# Web UI
+node dist/src/cli/cli.js web                                                # Start web UI (localhost:3700)
+node dist/src/cli/cli.js web --port 8080                                    # Custom port
 ```
 
 ## Environment variables
@@ -542,6 +547,12 @@ node dist/src/cli/cli.js daemon                                             # St
 | `N8N_BASE_URL` + `N8N_API_KEY` | n8n instance |
 | `PINCHTAB_URL` | PinchTab server (default: `http://127.0.0.1:9867`) |
 
+### Web UI
+
+| Variable | Description |
+|----------|-------------|
+| `CTT_WEB_PORT` | HTTP server port (default: `3700`) |
+
 Config file alternative: `.ctt-shell/config.json`
 
 ## Project structure
@@ -559,6 +570,7 @@ src/
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
   scheduler/      → Cron parser + task scheduler (zero-dep, persistent)
+  web/            → Web UI server (HTTP REST API + SPA, SSE streaming)
   mcp/            → MCP server (9 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
@@ -570,7 +582,7 @@ domains/
   git/            → Git version control (28 ops, 5 goals)
   email/          → Email IMAP/SMTP via Himalaya (15 ops, 5 goals)
 tests/
-  unit/           → 303 unit tests, 37 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer, scheduler)
+  unit/           → 324 unit tests, 38 suites (store, search, embeddings, normalizers, adapters, MCP, shell, context, agent, circuit breaker, sanitizer, scheduler, web server)
 ```
 
 ## MCP server
@@ -654,6 +666,55 @@ node dist/src/cli/cli.js daemon
 
 Shortcuts: `@daily` (0 0 * * *), `@hourly` (0 * * * *), `@weekly` (0 0 * * 0), `@monthly` (0 0 1 * *), `@yearly` (0 0 1 1 *)
 
+## Web UI
+
+Browser-based interface for managing CTT-Shell without CLI knowledge. Zero dependencies — uses Node.js `http` module.
+
+```bash
+# Start the web UI
+node dist/src/cli/cli.js web
+
+# Custom port
+node dist/src/cli/cli.js web --port 8080
+```
+
+Opens at `http://localhost:3700` with these views:
+
+| View | What it does |
+|------|-------------|
+| **Dashboard** | Store statistics (knowledge/skills/memories counts), registered domains overview |
+| **Execute** | Enter a goal in natural language, pick a domain, run the full pipeline with real-time SSE event streaming |
+| **Search** | Full-text search across all entities with score and metadata display |
+| **Domains** | Domain cards with knowledge counts and extract button |
+| **Context** | Add business context (text or file content), view/remove loaded entries |
+| **Schedule** | Visual cron presets (hourly, daily, weekdays), task list with enable/disable/remove |
+| **Config** | Active LLM provider detection, env var status, config file editor |
+
+### REST API
+
+The web server exposes a REST API that mirrors the MCP tools:
+
+```
+GET  /api/domains         List domains
+GET  /api/stats           Store statistics
+POST /api/search          Search {query, limit?}
+POST /api/execute         Run pipeline (SSE stream) {goal, domain?}
+POST /api/recall          Build context {goal}
+POST /api/extract         Extract knowledge {domain}
+GET  /api/context         List context entries
+POST /api/context         Add context {text, title?, category?}
+DELETE /api/context/:id   Remove context entry
+GET  /api/schedule        List scheduled tasks
+POST /api/schedule        Add task {cron, goal, domain?}
+PUT  /api/schedule/:id    Toggle enabled {enabled}
+DELETE /api/schedule/:id  Remove task
+POST /api/shell           Execute command {command, role?}
+GET  /api/config          Get config (secrets masked)
+PUT  /api/config          Update config file
+```
+
+The execute endpoint uses **Server-Sent Events** (SSE) — the browser receives real-time events for each pipeline phase (recall, plan, normalize, validate, execute, learn) as they happen.
+
 ## Context loader (business knowledge)
 
 Load domain-specific business context that enriches LLM prompts. Context entries are indexed by TF-IDF and appear in RECALL results alongside domain operations.
@@ -696,7 +757,7 @@ Basic plan $29/month, Premium $99/month...
 npm run build && npm test
 ```
 
-303 tests across 37 suites covering:
+324 tests across 38 suites covering:
 - **Store** (8) — CRUD, SHA-256 dedup, batch operations
 - **TF-IDF search** (6) — matching, ranking, query expansion
 - **Embeddings** (10) — RRF fusion, weights, deduplication, empty inputs
@@ -710,6 +771,7 @@ npm run build && npm test
 - **Circuit breaker** (12) — threshold, reset, antipatterns, lazy load, extractHost
 - **Sanitizer** (22) — 4-layer sanitization, round-trip, nested objects, known prefixes
 - **Scheduler** (40) — cron parser (wildcards, ranges, lists, intervals, shortcuts), cronMatches, validateCron, describeCron, nextRun, task CRUD, persistence, tick execution/skip/failure
+- **Web server** (21) — static routes, CORS, API endpoints (domains, stats, search, extract, recall, context CRUD, schedule CRUD, config), error handling
 
 ## How CTT works
 

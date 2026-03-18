@@ -24,6 +24,7 @@ export interface AutonomousAgentConfig {
   maxRetries?: number;       // default 2
   temperature?: number;      // default 0.1
   compact?: boolean;         // auto-detect from model name
+  onEvent?: (event: AgentEvent) => void;  // optional callback for real-time event streaming
 }
 
 export interface AgentRunResult {
@@ -78,6 +79,7 @@ export class AutonomousAgent {
   private maxRetries: number;
   private temperature: number;
   private compact: boolean;
+  private onEvent?: (event: AgentEvent) => void;
 
   constructor(config: AutonomousAgentConfig) {
     this.store = config.store;
@@ -89,6 +91,7 @@ export class AutonomousAgent {
     this.maxRetries = config.maxRetries ?? 2;
     this.temperature = config.temperature ?? 0.1;
     this.compact = config.compact ?? false;
+    this.onEvent = config.onEvent;
   }
 
   /** Run the full autonomous pipeline */
@@ -97,7 +100,9 @@ export class AutonomousAgent {
     let retries = 0;
 
     const emit = (phase: AgentPhase, message: string, data?: unknown) => {
-      events.push({ phase, timestamp: new Date().toISOString(), message, data });
+      const event: AgentEvent = { phase, timestamp: new Date().toISOString(), message, data };
+      events.push(event);
+      this.onEvent?.(event);
     };
 
     try {

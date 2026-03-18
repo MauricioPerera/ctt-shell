@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CTT-Shell</title>
+<style>
+/* ─── Variables & Reset ─────────────────────────────────────────────── */
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d28;
+  --surface2: #232736;
+  --border: #2e3348;
+  --text: #e0e2ed;
+  --text2: #8b90a5;
+  --primary: #6c8aff;
+  --primary-dim: #3d5afe;
+  --success: #4caf86;
+  --error: #e25555;
+  --warn: #e2a555;
+  --radius: 8px;
+  --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── Sidebar ───────────────────────────────────────────────────────── */
+nav {
+  width: 200px;
+  min-width: 200px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+}
+.logo {
+  padding: 0 16px 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: -0.5px;
+}
+.logo small { font-size: 11px; color: var(--text2); font-weight: 400; display: block; margin-top: 2px; }
+nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  color: var(--text2);
+  text-decoration: none;
+  font-size: 13px;
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+nav a:hover { color: var(--text); background: var(--surface2); }
+nav a.active { color: var(--primary); background: var(--surface2); border-left-color: var(--primary); }
+nav a .icon { font-size: 16px; width: 20px; text-align: center; }
+
+/* ─── Main Content ──────────────────────────────────────────────────── */
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+}
+section { display: none; }
+section.active { display: block; }
+h1 { font-size: 22px; font-weight: 600; margin-bottom: 20px; }
+h2 { font-size: 16px; font-weight: 600; margin: 20px 0 12px; color: var(--text2); }
+
+/* ─── Cards ─────────────────────────────────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.card .label { font-size: 11px; text-transform: uppercase; color: var(--text2); letter-spacing: 0.5px; }
+.card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+.card .value.success { color: var(--success); }
+.card .value.primary { color: var(--primary); }
+
+/* ─── Domain Cards ──────────────────────────────────────────────────── */
+.domain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.domain-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.domain-card .name { font-weight: 600; font-size: 15px; }
+.domain-card .id { font-size: 12px; color: var(--text2); font-family: var(--mono); }
+.domain-card .count { margin-top: 8px; font-size: 12px; color: var(--text2); }
+.domain-card .count span { color: var(--primary); font-weight: 600; }
+.domain-card .actions { margin-top: 10px; }
+
+/* ─── Forms & Inputs ────────────────────────────────────────────────── */
+input, textarea, select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: var(--font);
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--primary); }
+textarea { resize: vertical; min-height: 80px; font-family: var(--mono); font-size: 12px; }
+select { cursor: pointer; }
+label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; font-weight: 500; }
+.form-row { margin-bottom: 16px; }
+.form-row-inline { display: flex; gap: 12px; align-items: flex-end; }
+.form-row-inline > * { flex: 1; }
+
+/* ─── Buttons ───────────────────────────────────────────────────────── */
+button, .btn {
+  background: var(--primary-dim);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+button:hover, .btn:hover { background: var(--primary); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.btn-danger { background: var(--error); }
+.btn-danger:hover { background: #ff4444; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text2); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); background: transparent; }
+.btn-success { background: var(--success); }
+
+/* ─── Tables ────────────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; color: var(--text2); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.5px; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+tr:hover td { background: var(--surface2); }
+
+/* ─── Tags ──────────────────────────────────────────────────────────── */
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.tag-phase { background: var(--surface2); color: var(--primary); border: 1px solid var(--border); }
+.tag-success { background: rgba(76,175,134,0.15); color: var(--success); }
+.tag-error { background: rgba(226,85,85,0.15); color: var(--error); }
+.tag-enabled { background: rgba(76,175,134,0.15); color: var(--success); }
+.tag-disabled { background: var(--surface2); color: var(--text2); }
+
+/* ─── Event Log ─────────────────────────────────────────────────────── */
+.event-log {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.event-log .ev {
+  padding: 2px 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.event-log .ev-phase {
+  color: var(--primary);
+  min-width: 70px;
+  font-weight: 500;
+}
+.event-log .ev-msg { color: var(--text); }
+.event-log .ev-time { color: var(--text2); font-size: 10px; }
+
+/* ─── Result Box ────────────────────────────────────────────────────── */
+.result-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 16px;
+}
+.result-box.result-success { border-color: var(--success); }
+.result-box.result-error { border-color: var(--error); }
+.result-box pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; color: var(--text2); margin-top: 8px; }
+
+/* ─── Search Results ────────────────────────────────────────────────── */
+.search-result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+.search-result .sr-header { display: flex; justify-content: space-between; align-items: center; }
+.search-result .sr-name { font-weight: 600; }
+.search-result .sr-score { font-family: var(--mono); font-size: 12px; color: var(--primary); }
+.search-result .sr-meta { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.search-result .sr-desc { font-size: 12px; color: var(--text2); margin-top: 6px; line-height: 1.5; }
+
+/* ─── Cron Builder ──────────────────────────────────────────────────── */
+.cron-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.cron-presets button { padding: 4px 10px; font-size: 11px; }
+
+/* ─── Loading ───────────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: var(--text2); font-size: 13px; }
+
+/* ─── Empty State ───────────────────────────────────────────────────── */
+.empty { text-align: center; padding: 40px; color: var(--text2); }
+.empty .icon { font-size: 32px; margin-bottom: 12px; }
+
+/* ─── Toast ─────────────────────────────────────────────────────────── */
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
+.toast {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-top: 8px;
+  font-size: 13px;
+  animation: slideIn 0.2s ease;
+  max-width: 360px;
+}
+.toast.toast-error { border-color: var(--error); }
+.toast.toast-success { border-color: var(--success); }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ─── Responsive ────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  nav { width: 60px; min-width: 60px; }
+  nav a span { display: none; }
+  nav .logo { font-size: 14px; padding: 0 8px 16px; }
+  nav .logo small { display: none; }
+  main { padding: 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Sidebar ───────────────────────────────────────────────────────── -->
+<nav>
+  <div class="logo">CTT-Shell<small>AI Agent Framework</small></div>
+  <a href="#" data-view="dashboard" class="active"><span class="icon">&#9632;</span> <span>Dashboard</span></a>
+  <a href="#" data-view="execute"><span class="icon">&#9654;</span> <span>Execute</span></a>
+  <a href="#" data-view="search"><span class="icon">&#9906;</span> <span>Search</span></a>
+  <a href="#" data-view="domains"><span class="icon">&#9881;</span> <span>Domains</span></a>
+  <a href="#" data-view="context"><span class="icon">&#9998;</span> <span>Context</span></a>
+  <a href="#" data-view="schedule"><span class="icon">&#9200;</span> <span>Schedule</span></a>
+  <a href="#" data-view="config"><span class="icon">&#9881;</span> <span>Config</span></a>
+</nav>
+
+<!-- ─── Main Content ──────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Dashboard -->
+  <section id="view-dashboard" class="active">
+    <h1>Dashboard</h1>
+    <div id="stats-cards" class="cards"></div>
+    <h2>Domains</h2>
+    <div id="dash-domains" class="domain-grid"></div>
+  </section>
+
+  <!-- Execute -->
+  <section id="view-execute">
+    <h1>Execute Goal</h1>
+    <div class="form-row">
+      <label>What do you want to accomplish?</label>
+      <textarea id="exec-goal" placeholder="Describe your goal in natural language...&#10;Examples:&#10;  Create a blog post about AI trends&#10;  Check unread emails&#10;  List git branches"></textarea>
+    </div>
+    <div class="form-row-inline">
+      <div>
+        <label>Domain (optional)</label>
+        <select id="exec-domain"><option value="">Auto-detect</option></select>
+      </div>
+      <div style="flex:0">
+        <label>&nbsp;</label>
+        <button id="exec-btn" onclick="runExecute()">Run Pipeline</button>
+      </div>
+    </div>
+    <div id="exec-events" style="margin-top:20px"></div>
+    <div id="exec-result"></div>
+  </section>
+
+  <!-- Search -->
+  <section id="view-search">
+    <h1>Search</h1>
+    <div class="form-row-inline">
+      <div>
+        <input type="text" id="search-input" placeholder="Search knowledge, skills, memories..." onkeydown="if(event.key==='Enter')runSearch()">
+      </div>
+      <div style="flex:0">
+        <button onclick="runSearch()">Search</button>
+      </div>
+    </div>
+    <div id="search-results" style="margin-top:20px"></div>
+  </section>
+
+  <!-- Domains -->
+  <section id="view-domains">
+    <h1>Domains</h1>
+    <div id="domains-grid" class="domain-grid"></div>
+  </section>
+
+  <!-- Context -->
+  <section id="view-context">
+    <h1>Business Context</h1>
+    <p style="color:var(--text2);margin-bottom:16px;font-size:13px">
+      Add background knowledge that enriches LLM prompts. Supports Markdown, JSON, and plain text.
+    </p>
+    <div class="card" style="margin-bottom:20px">
+      <div class="form-row">
+        <label>Add context text</label>
+        <textarea id="ctx-text" placeholder="Paste your business context here...&#10;&#10;For example: pricing info, product details, FAQs, policies..."></textarea>
+      </div>
+      <div class="form-row-inline">
+        <div>
+          <label>Title (optional)</label>
+          <input type="text" id="ctx-title" placeholder="e.g., Pricing Info">
+        </div>
+        <div>
+          <label>Category (optional)</label>
+          <input type="text" id="ctx-category" placeholder="e.g., product, policy, faq">
+        </div>
+        <div style="flex:0">
+          <label>&nbsp;</label>
+          <button onclick="addContext()">Add</button>
+        </div>
+      </div>
+    </div>
+    <h2>Loaded Context</h2>
+    <div id="ctx-list"></div>
+  </section>
+
+  <!-- Schedule -->
+  <section id="view-schedule">
+    <h1>Scheduled Tasks</h1>
+    <p style="color:var(--text2);margin-bottom:16px;font-size:13px">
+      Create recurring tasks that run the autonomous pipeline on a cron schedule.
+    </p>
+    <div class="card" style="margin-bottom:20px">
+      <div class="form-row">
+        <label>Quick presets</label>
+        <div class="cron-presets">
+          <button class="btn-sm btn-outline" onclick="setCron('@hourly')">Every hour</button>
+          <button class="btn-sm btn-outline" onclick="setCron('0 9 * * *')">Daily 9am</button>
+          <button class="btn-sm btn-outline" onclick="setCron('0 9 * * 1-5')">Weekdays 9am</button>
+          <button class="btn-sm btn-outline" onclick="setCron('*/30 * * * *')">Every 30min</button>
+          <button class="btn-sm btn-outline" onclick="setCron('0 */2 * * *')">Every 2h</button>
+          <button class="btn-sm btn-outline" onclick="setCron('@daily')">Daily midnight</button>
+          <button class="btn-sm btn-outline" onclick="setCron('@weekly')">Weekly</button>
+        </div>
+      </div>
+      <div class="form-row-inline">
+        <div style="flex:0.5">
+          <label>Cron expression</label>
+          <input type="text" id="sched-cron" placeholder="0 9 * * *" style="font-family:var(--mono)">
+        </div>
+        <div>
+          <label>Goal</label>
+          <input type="text" id="sched-goal" placeholder="What should the agent do?">
+        </div>
+        <div style="flex:0.5">
+          <label>Domain (optional)</label>
+          <select id="sched-domain"><option value="">Auto</option></select>
+        </div>
+        <div style="flex:0">
+          <label>&nbsp;</label>
+          <button onclick="addSchedule()">Add</button>
+        </div>
+      </div>
+    </div>
+    <h2>Tasks</h2>
+    <div id="sched-list"></div>
+  </section>
+
+  <!-- Config -->
+  <section id="view-config">
+    <h1>Configuration</h1>
+    <div id="config-form"></div>
+  </section>
+
+</main>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+let currentView = 'dashboard';
+
+// ─── API Helper ─────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api/' + path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
+// ─── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' toast-' + type : '');
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ─── Router ─────────────────────────────────────────────────────────────────
+const views = document.querySelectorAll('main > section');
+const navLinks = document.querySelectorAll('nav a[data-view]');
+
+function showView(name) {
+  currentView = name;
+  views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  navLinks.forEach(a => a.classList.toggle('active', a.dataset.view === name));
+  if (loaders[name]) loaders[name]();
+}
+
+navLinks.forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  showView(a.dataset.view);
+}));
+
+// ─── HTML Helpers ───────────────────────────────────────────────────────────
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// ─── View Loaders ───────────────────────────────────────────────────────────
+const loaders = {
+  async dashboard() {
+    const [stats, domains] = await Promise.all([api('GET', 'stats'), api('GET', 'domains')]);
+    document.getElementById('stats-cards').innerHTML =
+      `<div class="card"><div class="label">Knowledge</div><div class="value primary">${stats.knowledge}</div></div>` +
+      `<div class="card"><div class="label">Skills</div><div class="value success">${stats.skill}</div></div>` +
+      `<div class="card"><div class="label">Memories</div><div class="value">${stats.memory}</div></div>` +
+      `<div class="card"><div class="label">Profiles</div><div class="value">${stats.profile}</div></div>` +
+      `<div class="card"><div class="label">Domains</div><div class="value primary">${stats.domains.length}</div></div>`;
+
+    document.getElementById('dash-domains').innerHTML = domains.map(d =>
+      `<div class="domain-card">
+        <div class="name">${esc(d.name)}</div>
+        <div class="id">${esc(d.id)}</div>
+        <div class="count"><span>${d.knowledgeCount}</span> knowledge entities</div>
+      </div>`
+    ).join('');
+  },
+
+  async execute() {
+    const domains = await api('GET', 'domains');
+    const sel = document.getElementById('exec-domain');
+    if (sel.children.length <= 1) {
+      domains.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name + ' (' + d.id + ')';
+        sel.appendChild(opt);
+      });
+    }
+  },
+
+  async domains() {
+    const domains = await api('GET', 'domains');
+    document.getElementById('domains-grid').innerHTML = domains.map(d =>
+      `<div class="domain-card">
+        <div class="name">${esc(d.name)}</div>
+        <div class="id">${esc(d.id)}</div>
+        <div class="count"><span>${d.knowledgeCount}</span> knowledge entities</div>
+        <div class="actions">
+          <button class="btn-sm btn-outline" onclick="extractDomain('${esc(d.id)}')">Extract Knowledge</button>
+        </div>
+      </div>`
+    ).join('');
+  },
+
+  async context() {
+    const data = await api('GET', 'context');
+    if (data.count === 0) {
+      document.getElementById('ctx-list').innerHTML = '<div class="empty"><div class="icon">&#9998;</div>No context entries yet.<br>Add some above to enrich your LLM prompts.</div>';
+      return;
+    }
+    document.getElementById('ctx-list').innerHTML = `<table>
+      <thead><tr><th>Title</th><th>Category</th><th>Source</th><th>Preview</th><th></th></tr></thead>
+      <tbody>${data.entries.map(e => `<tr>
+        <td>${esc(e.title)}</td>
+        <td>${e.category ? '<span class="tag tag-phase">' + esc(e.category) + '</span>' : '-'}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(e.source || '-')}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${esc(e.preview)}</td>
+        <td><button class="btn-sm btn-danger" onclick="removeContext('${esc(e.id)}')">Remove</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  },
+
+  async schedule() {
+    // Populate domain selects
+    const domains = await api('GET', 'domains');
+    const sel = document.getElementById('sched-domain');
+    if (sel.children.length <= 1) {
+      domains.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name;
+        sel.appendChild(opt);
+      });
+    }
+
+    const data = await api('GET', 'schedule');
+    if (data.count === 0) {
+      document.getElementById('sched-list').innerHTML = '<div class="empty"><div class="icon">&#9200;</div>No scheduled tasks.<br>Create one above.</div>';
+      return;
+    }
+    document.getElementById('sched-list').innerHTML = `<table>
+      <thead><tr><th>Schedule</th><th>Goal</th><th>Domain</th><th>Status</th><th>Runs</th><th>Last Run</th><th></th></tr></thead>
+      <tbody>${data.tasks.map(t => `<tr>
+        <td>
+          <div style="font-family:var(--mono);font-size:12px">${esc(t.cron)}</div>
+          <div style="font-size:11px;color:var(--text2)">${esc(t.description)}</div>
+        </td>
+        <td>${esc(t.goal)}</td>
+        <td>${t.domain ? '<span class="tag tag-phase">' + esc(t.domain) + '</span>' : 'Auto'}</td>
+        <td><span class="tag ${t.enabled ? 'tag-enabled' : 'tag-disabled'}">${t.enabled ? 'Enabled' : 'Disabled'}</span></td>
+        <td>${t.runCount} <span style="color:var(--text2)">/ ${t.failCount} fails</span></td>
+        <td style="font-size:11px;color:var(--text2)">
+          ${t.lastRunAt ? esc(t.lastRunAt) : 'Never'}
+          ${t.lastResult ? '<br><span class="tag ' + (t.lastResult === 'success' ? 'tag-success' : 'tag-error') + '">' + t.lastResult + '</span>' : ''}
+        </td>
+        <td>
+          <button class="btn-sm btn-outline" onclick="toggleSchedule('${esc(t.id)}', ${!t.enabled})">${t.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn-sm btn-danger" onclick="removeSchedule('${esc(t.id)}')">Remove</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  },
+
+  async config() {
+    const cfg = await api('GET', 'config');
+    document.getElementById('config-form').innerHTML = `
+      <div class="card" style="max-width:600px">
+        <h2 style="margin-top:0">Active LLM Provider</h2>
+        <div style="margin-bottom:16px">
+          <span class="tag tag-phase" style="font-size:14px;padding:4px 12px">${esc(cfg.activeLlm)}</span>
+        </div>
+
+        <h2>Environment Variables</h2>
+        <table>
+          ${Object.entries(cfg.envVars).map(([k, v]) => `<tr>
+            <td style="font-family:var(--mono);font-size:12px">${k}</td>
+            <td><span class="tag ${v ? 'tag-success' : 'tag-disabled'}">${v ? 'Set' : 'Not set'}</span></td>
+          </tr>`).join('')}
+        </table>
+
+        <h2>Config File Settings</h2>
+        <div class="form-row">
+          <label>Cloudflare Model</label>
+          <input type="text" id="cfg-cfModel" value="${esc(cfg.cfModel)}" placeholder="@cf/meta/llama-3.2-3b-instruct">
+        </div>
+        <div class="form-row">
+          <label>Cloudflare Gateway</label>
+          <input type="text" id="cfg-cfGateway" value="${esc(cfg.cfGateway)}" placeholder="Optional gateway ID">
+        </div>
+        <div class="form-row">
+          <label>Ollama Model</label>
+          <input type="text" id="cfg-ollamaModel" value="${esc(cfg.ollamaModel)}" placeholder="qwen2.5:3b">
+        </div>
+        <div class="form-row">
+          <label>llama.cpp Model</label>
+          <input type="text" id="cfg-llamacppModel" value="${esc(cfg.llamacppModel)}" placeholder="model-name">
+        </div>
+        <div class="form-row">
+          <label>llama.cpp Base URL</label>
+          <input type="text" id="cfg-llamacppBaseUrl" value="${esc(cfg.llamacppBaseUrl)}" placeholder="http://localhost:8080">
+        </div>
+        <button onclick="saveConfig()">Save Configuration</button>
+      </div>
+    `;
+  },
+};
+
+// ─── Actions ────────────────────────────────────────────────────────────────
+
+async function runExecute() {
+  const goal = document.getElementById('exec-goal').value.trim();
+  if (!goal) { toast('Enter a goal first', 'error'); return; }
+  const domain = document.getElementById('exec-domain').value;
+  const btn = document.getElementById('exec-btn');
+  const eventsEl = document.getElementById('exec-events');
+  const resultEl = document.getElementById('exec-result');
+
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  eventsEl.innerHTML = '<div class="event-log" id="exec-log"><div class="loading-text"><span class="spinner"></span>Starting pipeline...</div></div>';
+  resultEl.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, domain: domain || undefined }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const log = document.getElementById('exec-log');
+    log.innerHTML = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'event') {
+            const ev = data.event;
+            log.innerHTML += `<div class="ev"><span class="ev-phase">${esc(ev.phase)}</span><span class="ev-msg">${esc(ev.message)}</span></div>`;
+            log.scrollTop = log.scrollHeight;
+          } else if (data.type === 'result') {
+            const r = data;
+            const cls = r.success ? 'result-success' : 'result-error';
+            let html = `<div class="result-box ${cls}">`;
+            html += `<strong>${r.success ? 'Success' : 'Failed'}</strong>`;
+            if (r.error) html += `<span style="color:var(--error);margin-left:12px">${esc(r.error)}</span>`;
+            if (r.retries > 0) html += `<span style="color:var(--text2);margin-left:12px">(${r.retries} retries)</span>`;
+            if (r.plan) {
+              html += '<pre>' + r.plan.steps.map(s => `Step ${s.stepId}: [${s.operationId}] ${s.description || ''}`).join('\n') + '</pre>';
+            }
+            if (r.execution) {
+              html += '<h2 style="margin-top:12px">Execution</h2><pre>' +
+                r.execution.steps.map(s => `${s.success ? '+' : 'x'} ${s.operationId}${s.error ? ' - ' + s.error : ''}`).join('\n') +
+                `\nDuration: ${r.execution.durationMs}ms</pre>`;
+            }
+            html += '</div>';
+            resultEl.innerHTML = html;
+          }
+        } catch { /* skip invalid lines */ }
+      }
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<div class="result-box result-error"><strong>Error:</strong> ${esc(e.message)}</div>`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Run Pipeline';
+}
+
+async function runSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+  const el = document.getElementById('search-results');
+  el.innerHTML = '<div class="loading-text"><span class="spinner"></span>Searching...</div>';
+
+  try {
+    const results = await api('POST', 'search', { query, limit: 20 });
+    if (results.length === 0) {
+      el.innerHTML = '<div class="empty">No results found.</div>';
+      return;
+    }
+    el.innerHTML = results.map(r => `
+      <div class="search-result">
+        <div class="sr-header">
+          <span class="sr-name">${esc(r.name)}</span>
+          <span class="sr-score">${r.score}</span>
+        </div>
+        <div class="sr-meta">
+          <span class="tag tag-phase">${esc(r.type)}</span>
+          <span class="tag tag-phase">${esc(r.domainId)}</span>
+          ${r.operationId ? '<span style="font-family:var(--mono);font-size:11px;color:var(--text2)">' + esc(r.operationId) + '</span>' : ''}
+        </div>
+        ${r.description ? '<div class="sr-desc">' + esc(r.description) + '</div>' : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="result-box result-error">${esc(e.message)}</div>`;
+  }
+}
+
+async function extractDomain(id) {
+  try {
+    const result = await api('POST', 'extract', { domain: id });
+    toast(`Extracted ${result.extracted} entities from "${id}"`, 'success');
+    loaders.domains();
+    loaders.dashboard();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function addContext() {
+  const text = document.getElementById('ctx-text').value.trim();
+  if (!text) { toast('Enter some text first', 'error'); return; }
+  const title = document.getElementById('ctx-title').value.trim() || undefined;
+  const category = document.getElementById('ctx-category').value.trim() || undefined;
+
+  try {
+    await api('POST', 'context', { text, title, category });
+    document.getElementById('ctx-text').value = '';
+    document.getElementById('ctx-title').value = '';
+    document.getElementById('ctx-category').value = '';
+    toast('Context added', 'success');
+    loaders.context();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function removeContext(id) {
+  try {
+    await api('DELETE', 'context/' + id);
+    toast('Context removed', 'success');
+    loaders.context();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function setCron(expr) {
+  document.getElementById('sched-cron').value = expr;
+}
+
+async function addSchedule() {
+  const cron = document.getElementById('sched-cron').value.trim();
+  const goal = document.getElementById('sched-goal').value.trim();
+  if (!cron || !goal) { toast('Enter cron and goal', 'error'); return; }
+  const domain = document.getElementById('sched-domain').value || undefined;
+
+  try {
+    const task = await api('POST', 'schedule', { cron, goal, domain });
+    document.getElementById('sched-cron').value = '';
+    document.getElementById('sched-goal').value = '';
+    toast(`Task scheduled: ${task.description}`, 'success');
+    loaders.schedule();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function toggleSchedule(id, enabled) {
+  try {
+    await api('PUT', 'schedule/' + id, { enabled });
+    toast(`Task ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    loaders.schedule();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function removeSchedule(id) {
+  try {
+    await api('DELETE', 'schedule/' + id);
+    toast('Task removed', 'success');
+    loaders.schedule();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function saveConfig() {
+  try {
+    const body = {
+      cfModel: document.getElementById('cfg-cfModel').value.trim(),
+      cfGateway: document.getElementById('cfg-cfGateway').value.trim(),
+      ollamaModel: document.getElementById('cfg-ollamaModel').value.trim(),
+      llamacppModel: document.getElementById('cfg-llamacppModel').value.trim(),
+      llamacppBaseUrl: document.getElementById('cfg-llamacppBaseUrl').value.trim(),
+    };
+    await api('PUT', 'config', body);
+    toast('Configuration saved', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ─── Init ───────────────────────────────────────────────────────────────────
+showView('dashboard');
+</script>
+</body>
+</html>

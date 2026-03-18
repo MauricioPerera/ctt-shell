@@ -104,6 +104,7 @@ Commands:
   schedule remove <id>        Remove a scheduled task
   schedule enable/disable <id> Enable or disable a task
   daemon                      Start scheduler daemon (long-running)
+  web [--port 3700]           Start web UI server
   mcp                         Start MCP server (stdio transport)
   help                        Show this help
 
@@ -489,6 +490,14 @@ Environment:
 
       // Keep process alive
       await new Promise(() => {});
+      break;
+    }
+
+    case 'web': {
+      const { startWebServer } = await import('../web/server.js');
+      const portFlag2 = args.indexOf('--port');
+      const webPort = portFlag2 >= 0 ? parseInt(args[portFlag2 + 1], 10) : undefined;
+      await startWebServer(webPort);
       break;
     }
 

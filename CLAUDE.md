@@ -33,6 +33,7 @@ src/
   shell/          → Shell Engine (parser, executor, RBAC policy, audit log)
   context/        → Context Loader (user-provided business knowledge ingestion)
   scheduler/      → Cron parser + task scheduler (daemon mode)
+  web/            → Web UI server (HTTP REST API + single-page app, SSE streaming)
   mcp/            → MCP server (9 tools, stdio JSON-RPC 2.0)
   cli/            → CLI entry point
 domains/
@@ -50,7 +51,7 @@ contracts/        → Specification contracts
 ## Commands
 ```bash
 npm run build                                    # Compile TypeScript
-npm test                                         # Run 303 unit tests
+npm test                                         # Run 324 unit tests
 node dist/src/cli/cli.js search <query>          # TF-IDF search across all domains
 node dist/src/cli/cli.js exec <goal>             # Autonomous pipeline
 node dist/src/cli/cli.js eval                    # Evaluate all domains
@@ -72,6 +73,8 @@ node dist/src/cli/cli.js schedule add "0 9 * * *" "check unread emails"  # Sched
 node dist/src/cli/cli.js schedule list           # List scheduled tasks
 node dist/src/cli/cli.js schedule remove <id>    # Remove a scheduled task
 node dist/src/cli/cli.js daemon                  # Start scheduler daemon (long-running)
+node dist/src/cli/cli.js web                     # Start web UI server (localhost:3700)
+node dist/src/cli/cli.js web --port 8080         # Start web UI on custom port
 node dist/src/cli/cli.js mcp                     # Start MCP server (stdio)
 node dist/src/cli/cli.js benchmark               # Run performance benchmarks
 ```
@@ -129,6 +132,7 @@ interface DomainAdapter {
 7. Add eval goals (3-5: simple, medium, complex)
 8. Register in `src/cli/cli.ts` (import + register + eval goals)
 9. Register in `src/mcp/server.ts` (import + register)
+9b. Register in `src/web/server.ts` (import + register)
 10. Add binary to `src/shell/policy.ts` dev allowedCommands if not already there
 11. Add tests to `tests/unit/domain-adapters.test.ts`
 12. `npm run build && npm test`
@@ -368,6 +372,48 @@ Exposes CTT pipeline + shell as MCP tools over stdio (JSON-RPC 2.0, protocol ver
 ### Content-Length framing
 Messages use `Content-Length: N\r\n\r\n{json}` framing per MCP spec. Logs go to stderr.
 
+## Web UI (src/web/)
+Browser-based interface for non-technical users. Zero dependencies — uses Node.js `http` module.
+
+### How it works
+- `ctt-shell web` starts HTTP server on `localhost:3700`
+- Serves a single `index.html` SPA with all CSS/JS inline
+- REST API endpoints reuse the same infrastructure as MCP and CLI
+- SSE (Server-Sent Events) for real-time execution pipeline streaming
+- `onEvent` callback on `AutonomousAgent` enables per-phase event streaming
+
+### REST API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/domains` | GET | List registered domains |
+| `/api/stats` | GET | Store statistics |
+| `/api/search` | POST | Search knowledge/skills/memories |
+| `/api/execute` | POST | Run autonomous pipeline (SSE stream) |
+| `/api/recall` | POST | Build CTT context without executing |
+| `/api/extract` | POST | Extract knowledge from a domain |
+| `/api/context` | GET | List context entries |
+| `/api/context` | POST | Add context (text or file content) |
+| `/api/context/:id` | DELETE | Remove context entry |
+| `/api/schedule` | GET | List scheduled tasks |
+| `/api/schedule` | POST | Add scheduled task |
+| `/api/schedule/:id` | PUT | Enable/disable task |
+| `/api/schedule/:id` | DELETE | Remove task |
+| `/api/shell` | POST | Execute shell command with RBAC |
+| `/api/config` | GET | Get config (secrets masked) |
+| `/api/config` | PUT | Update config file |
+
+### UI Views
+- **Dashboard** — store stats, domain overview
+- **Execute** — goal input + domain selector + SSE event log + result display
+- **Search** — full-text search across all entities
+- **Domains** — domain cards with extract knowledge button
+- **Context** — add/remove business context (text input)
+- **Schedule** — cron preset buttons + task CRUD with enable/disable
+- **Config** — LLM provider status, env var detection, config file editor
+
+### Environment
+- `CTT_WEB_PORT` — HTTP port (default: 3700)
+
 ## Context Loader (src/context/)
 User-provided business knowledge that enriches LLM prompts with domain-specific background.
 
@@ -400,7 +446,7 @@ Place files in `.ctt-shell/context/` for auto-loading, or load manually via CLI/
 ## Store location
 `.ctt-shell/store/` — Contains knowledge/, skill/, memory/, profile/ per domain
 
-## Test suite (303 tests, 37 suites)
+## Test suite (324 tests, 38 suites)
 ```
 tests/unit/
   domain-adapters.test.ts    → 85 tests: knowledge extraction, validation, normalization for all 7 domains
@@ -417,6 +463,7 @@ tests/unit/
   enrich.test.ts             → 10 tests: enrichMemory, applyEnrichment, enrichMemories batch, LLM error handling
   embedding.test.ts          → 10 tests: hybridSearch RRF, weight params, deduplication, edge cases
   scheduler.test.ts          → 40 tests: cron parser, cronMatches, validation, nextRun, task CRUD, daemon tick, persistence
+  web-server.test.ts         → 21 tests: static routes, API endpoints (domains, stats, search, extract, recall, context CRUD, schedule CRUD, config), error handling
 ```
 
 ## Zero runtime dependencies
